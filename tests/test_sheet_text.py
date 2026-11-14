@@ -1,5 +1,5 @@
 """Raster sheets answered from their own text: OCR rows -> document clerk (no OCR engine or LLM needed here)."""
-from stoa_qa import docqa, llm, sheet_ocr
+from stoa_qa import construction_detect, docqa, llm, sheet_ocr
 
 LINES = [  # what sheet_ocr.read returns for a piping plan: tags on one printed line, a note, a vertical title-block line
     {"box": [100, 100, 220, 112], "text": "CV-1", "conf": 0.9}, {"box": [300, 100, 420, 112], "text": "CV-2", "conf": 0.9},
@@ -50,6 +50,32 @@ def test_a_named_tag_prefix_counts_only_that_prefix(monkeypatch):
                                                             "answer": None, "unit": None, "note": ""}, None))
     a, _ = docqa.ask("uploads/x.png", "How many check valves (CV) are there?", rows=rows)
     assert a.value == 2 and [e.label for e in a.evidence] == ["CV-1", "CV-2"]
+
+
+def test_exact_tags_do_not_match_longer_tags_or_repeated_notes():
+    words = [(100 * i, 0, 100 * i + 60, 10, t)
+             for i, t in enumerate(["FSCV-1", "CV-10", "CV-1", "CV-1", "SEE CV-99"])]
+    rows = docqa.rows_of(words, 500)
+    a = docqa.tagged_count(docqa.tag_query("Highlight distinct check valve tags (CV)"), rows)
+    assert a.value == 2
+    assert {e.label for e in a.evidence} == {"CV-1", "CV-10"}
+    assert next(e.coords for e in a.evidence if e.label == "CV-1") == [[200, 0], [260, 10]]
+    assert docqa.tag_query("How many check valves in the west wing (CV)?") is None
+
+
+def test_ordinary_fixture_type_marks_are_not_unique_equipment_ids():
+    rows = docqa.rows_of([(0, 0, 50, 10, "WC-1"), (0, 30, 50, 40, "WC-1")], 300)
+    assert docqa.tagged_count(docqa.tag_query("How many toilets (WC)?"), rows) is None
+
+
+def test_piping_symbol_candidates_are_labelled_and_need_a_matching_sheet(monkeypatch):
+    monkeypatch.setattr(construction_detect.live, "live_config", lambda: {"pid_symbols": {"threshold": 0.5}})
+    monkeypatch.setattr(construction_detect, "boxes", lambda *args: [[0, 0.8, 1, 2, 10, 20], [2, 0.9, 3, 4, 20, 30]])
+    query = construction_detect.PID_ASK.fullmatch("Highlight all valves")
+    assert construction_detect.pid_answer("sheet.png", query, [{"text": "Water distribution"}]) is None
+    a = construction_detect.pid_answer("sheet.png", query, [{"text": "PIPING PLAN"}])
+    assert a.value == "1 possible valve" and len(a.evidence) == 1
+    assert a.evidence[0].coords == [[1, 2], [10, 20]]
 
 
 def test_tile_fragments_inside_a_longer_reading_are_dropped():

@@ -16,6 +16,43 @@
   "times": 2.0,
   "plus": 10
  },
+ "sliding": {
+  "run": "sliding-v1",
+  "threshold": 0.3
+ },
+ "wet_rooms": {
+  "run": "wet-room-v2",
+  "threshold": 0.5
+ },
+ "wet_room_boxes": {
+  "run": "bathroom-boxes-v1",
+  "imgsz": 1024,
+  "tile": 720,
+  "threshold": 0.5
+ },
+ "fixture_context": {
+  "run": "fixture-context-dorm-final",
+  "imgsz": 1024,
+  "min_side": 2600,
+  "min_rooms": 6,
+  "tile": 720,
+  "room_threshold": 0.35,
+  "thresholds": {"toilet": 0.4, "sink": 0.4, "shower": 0.4, "bathtub": 0.4},
+  "fixture_groups": true
+ },
+ "fixture_basics": {
+  "run": "fixture-context-v1",
+  "imgsz": 1024,
+  "tile": 960,
+  "room_threshold": 0.28,
+  "thresholds": {"toilet": 0.35, "sink": 0.35, "shower": 0.35, "bathtub": 0.35}
+ },
+ "pid_symbols": {
+  "run": "pid2graph-symbols-v1",
+  "imgsz": 960,
+  "tile": 960,
+  "threshold": 0.5
+ },
  "yolo_thresholds": {
   "doors": 0.45,
   "windows": 0.4,

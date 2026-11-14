@@ -23,7 +23,7 @@ ROOM_TYPES = {
     "bedrooms": r"\bbed ?rooms?\b|\bmaster bed|\bbdrm\b|^br ?\d?$|^\d? ?mh ?\d?$|\bmh\d|makuuhuone|schlafzimmer|"
                 r"\bchambre\b|camera da letto|\bsovrum|slaapkamer|dormitorio|\bhabitacion|sypialnia",
     "kitchens": r"\bkitchen|\bkitchenette|keittio|^kk$|^kt$|^k$|\bkuche|\bkueche|\bcuisine|\bcucina|^kok$|\bkeuken|\bcocina",
-    "bathrooms": r"\bbath ?rooms?\b|^bath$|\bwash ?room|^kh\b|^kph\b|^ph\b|\bpesuh|^sh\b|kylpyhuone|pesuhuone|^bad\b|"
+    "bathrooms": r"\bbath ?rooms?\b|^bath(?: ?\d+)?$|^en[- ]?suite(?: ?\d+)?$|\bwash ?room|^kh\b|^kph\b|^ph\b|\bpesuh|^sh\b|kylpyhuone|pesuhuone|^bad\b|"
                  r"\bsalle de bains?\b|\bbagno\b|\bbadrum|\bbadkamer|\bbano\b",
     "saunas": r"\bsauna|\bbastu",
     "balconies": r"\bbalcon|\bbalkon|\bparveke|^parv\b|\bloggia",

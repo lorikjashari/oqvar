@@ -79,6 +79,48 @@ def test_picked_run_is_the_fused_pair():
     assert cubicasa_live.members("ens-m13-s13") == ("m13-1280", "local-y11s-13c")
 
 
+def test_sliding_prompt_never_queries_the_all_door_detector():
+    assert cubicasa.upload_question_key("Highlight all sliding doors") == "sliding_doors"
+    assert cubicasa.upload_question_key("How many doors are in the lobby?") is None
+
+
+def test_tiles_cover_both_edges_when_image_is_just_bigger_than_a_tile():
+    assert cubicasa_live.tile_grid(980, 500, 960) == [(0, 0, 960, 500), (20, 0, 980, 500)]
+
+
+def test_bathroom_label_rescue_keeps_boxes_and_adds_only_distinct_enclosed_rooms(monkeypatch):
+    from stoa_qa import room_labels
+    from stoa_qa.core import Evidence
+
+    label = {"text": "Bath 1", "box": [10, 10, 15, 15]}
+    monkeypatch.setattr(cubicasa, "image_of", lambda path: "plan.png")
+    monkeypatch.setattr(room_labels, "read", lambda *a, **kw: [label, {"text": "Bedroom", "box": [0, 0, 1, 1]}])
+    polygon = [[30, 30], [50, 30], [50, 50], [30, 50]]
+    monkeypatch.setattr(room_labels, "rooms_of", lambda *a: [
+        {"labels": [label], "bbox": [0, 0, 20, 20], "poly": [[0, 0], [20, 0], [20, 20], [0, 20]]},
+        {"labels": [label], "bbox": [30, 30, 50, 50], "poly": polygon},
+        {"labels": [label], "bbox": [70, 70, 80, 80], "poly": None},
+    ])
+    detected = [Evidence("box", "yolo-0", "bathroom", None, [[0, 0], [20, 20]])]
+    answer = cubicasa._label_rescue("uploads/plan.png", "bathrooms", {}, detected)
+    assert answer.value == 2
+    assert answer.evidence[0] == detected[0]
+    assert answer.evidence[1].coords == polygon
+
+
+def test_unlocated_bathrooms_do_not_use_a_whole_sheet_vision_count(monkeypatch, live):
+    from stoa_qa import llm, pipeline, vision
+
+    p = uploads.save(_png())
+    monkeypatch.setattr(llm, "available", lambda: True)
+    monkeypatch.setattr(cubicasa, "_legend_answer", lambda *args: None)
+    monkeypatch.setattr(cubicasa, "_label_rescue", lambda *args: None)
+    monkeypatch.setattr(cubicasa, "_fixture_bathrooms", lambda *args: None)
+    monkeypatch.setattr(vision, "ask", lambda *args, **kwargs: pytest.fail("Vision should not guess the bathroom total"))
+    answer = pipeline.solve(uploads.drawing(p), "Highlight all bathrooms").answer
+    assert answer.value is None and answer.intent == "unreadable"
+
+
 def test_both_models_run_at_their_own_size_and_are_fused(live):
     out = cubicasa_live.boxes("ens-m13-s13", _plan(live["tmp"]))
     assert out["fused"] and out["complete"] and out["runs"] == ["m13-1280", "local-y11s-13c"]
@@ -91,7 +133,26 @@ def test_boxes_are_cached_per_image_and_run(live):
     first = cubicasa_live.boxes("ens-m13-s13", plan)
     second = cubicasa_live.boxes("ens-m13-s13", plan)
     assert first == second and len(live["calls"]) == 2  # the second call read the cache
-    assert (live["tmp"] / "live" / first["hash"] / "m13-1280.json").is_file()
+    assert list((live["tmp"] / "live" / first["hash"]).glob("*/m13-1280.json"))
+
+    # Replacing a checkpoint also replaces its predictions for previously seen images.
+    (live["weights"] / "m13-1280.pt").write_bytes(b"updated checkpoint")
+    assert cubicasa_live.boxes("ens-m13-s13", plan) == first
+    assert len(live["calls"]) == 3
+
+
+def test_failed_model_does_not_hide_other_model(live, monkeypatch):
+    load = cubicasa_live._load
+
+    def load_model(run):
+        if run == "m13-1280":
+            raise ValueError("invalid checkpoint")
+        return load(run)
+
+    monkeypatch.setattr(cubicasa_live, "_load", load_model)
+    out = cubicasa_live.boxes("ens-m13-s13", _plan(live["tmp"]))
+    assert out["runs"] == ["local-y11s-13c"] and not out["complete"]
+    assert out["boxes"] == BOXES["local-y11s-13c"]
 
 
 def test_one_model_alone_is_used_unfused(live):
@@ -122,6 +183,7 @@ def test_counts_use_the_val_thresholds_and_each_box_is_evidence(live):
     assert "Detected on this image just now by YOLO11 (m13-1280 + local-y11s-13c, fused)" in a.method
     assert a.confidence == 0.5  # one reader only: nothing agrees or disagrees
     assert cubicasa.answer(rel, "How many windows are there?").value == 0
+    assert cubicasa.answer(rel, "How many doors are in the kitchen?").value is None
 
 
 def test_lone_box_counts_when_confident_enough(live):
@@ -166,6 +228,31 @@ def test_upload_without_a_detector_is_refused_not_guessed(live, monkeypatch):
     assert d["detector"]["available"] == []
     r = c.post("/api/ask", json={"id": d["id"], "question": "How many doors are there?"}).json()
     assert r["value"] is None  # STOA_NO_LLM: no Gemma fallback either, so no number
+
+
+def test_upload_highlight_bypasses_count_only_cache(live, monkeypatch):
+    from stoa_qa import llm, vision
+    from stoa_qa.api import app
+
+    monkeypatch.setattr(cubicasa_live, "has_ultralytics", lambda: False)
+    monkeypatch.setattr(cubicasa, "_json", lambda _: {"counts": {"doors": 11}})
+    monkeypatch.setattr(llm, "available", lambda: True)
+    valid = {"box_2d": [100, 200, 300, 400], "label": "Door"}
+
+    def read(*args, **kwargs):
+        return vision._to_answer({"answer": 1, "unit": "count", "items": read.items}, (400, 300)), None
+
+    monkeypatch.setattr(vision, "ask", read)
+    c = TestClient(app)
+    d = c.post("/api/upload", content=_png()).json()
+    question = {"id": d["id"], "question": "How many doors are there and highlight them?"}
+    read.items = []
+    assert c.post("/api/ask", json=question).json()["intent"] == "unverified_marks"
+    read.items = [valid, valid]
+    answer = c.post("/api/ask", json=question).json()
+    assert answer["value"] == 1 and answer["engine"]["kind"] == "vision"
+    assert len(answer["overlay"]["items"]) == 1
+    assert cubicasa.upload_question_key("Highlight all doors") == "doors"
 
 
 def test_a_sheet_the_detectors_cannot_read_is_declined_not_counted_as_zero(live, monkeypatch):

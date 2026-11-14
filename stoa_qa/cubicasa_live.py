@@ -21,7 +21,9 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import logging
 import os
+import tempfile
 import threading
 from functools import lru_cache
 from pathlib import Path
@@ -30,6 +32,7 @@ from .cubicasa_ensemble import fuse
 
 REPO = Path(__file__).resolve().parent.parent
 CACHE = REPO / "eval_out" / "yolo" / "live"
+LOG = logging.getLogger(__name__)
 CONF = 0.05  # same as the offline predictions; thresholds are applied later, per question
 # the image size each run was trained and predicted at (modal_jobs/cubicasa_cloud.py, cubicasa_local.py)
 IMGSZ = {"m13-1280": 1280, "local-y11s-13c": 1024}
@@ -41,9 +44,10 @@ ENSEMBLES = {"ens-m13-s13": ("m13-1280", "local-y11s-13c")}
 # with tiling above 2000 px 78.5% -> 78.4% (one question in 2,000); 640 and 1280 px tiles scored lower.
 TILE = 960
 TILE_MIN_SIDE = 2000
+TILE_CACHE_VERSION = "edge2"
 
 _lock = threading.Lock()
-_models: dict[str, object] = {}
+_models: dict[str, tuple[tuple[Path, int, int, int], object]] = {}
 
 
 def weights_dir() -> Path:
@@ -52,7 +56,10 @@ def weights_dir() -> Path:
 
 def weight_file(run: str) -> Path | None:
     d = weights_dir()
-    return next((p for p in (d / f"{run}.pt", d / run / "best.pt", d / run / "weights" / "best.pt") if p.is_file()), None)
+    candidates = [d / f"{run}.pt", d / run / "best.pt", d / run / "weights" / "best.pt"]
+    if not os.environ.get("STOA_YOLO_WEIGHTS"):
+        candidates.append(REPO / "eval_out" / "yolo_runs" / run / "weights" / "best.pt")
+    return next((p for p in candidates if p.is_file()), None)
 
 
 @lru_cache(maxsize=1)
@@ -86,19 +93,29 @@ def image_hash(path: str | Path) -> str:
     return h.hexdigest()[:24]
 
 
-def _load(run: str):
+def _weight_version(path: Path) -> tuple[Path, int, int, int]:
+    stat = path.stat()
+    return path.resolve(), stat.st_ino, stat.st_mtime_ns, stat.st_size
+
+
+def _load(run: str, classes: list[str] | None = None):
     """The YOLO model of one run, loaded once per process."""
     with _lock:
-        if run not in _models:
+        path = weight_file(run)
+        if path is None:
+            raise FileNotFoundError(f"No checkpoint for {run}")
+        version = _weight_version(path)
+        entry = _models.get(run)
+        if entry is None or entry[0] != version:
             from ultralytics import YOLO
 
             from .cubicasa_rules import CLASSES
 
-            model = YOLO(str(weight_file(run)))
-            if len(model.names) != len(CLASSES):  # class ids index cubicasa_rules.CLASSES: other weights would mislabel
-                raise ValueError(f"{weight_file(run)} has {len(model.names)} classes, the plan detector needs {len(CLASSES)}")
-            _models[run] = model
-        return _models[run]
+            model = YOLO(str(path))
+            if model.task != "detect" or model.names != dict(enumerate(classes if classes is not None else CLASSES)):
+                raise ValueError(f"{path.name} does not match the plan detector's class names and order")
+            entry = _models[run] = (version, model)
+        return entry[1]
 
 
 def _imgsz(run: str, model) -> int:
@@ -140,7 +157,7 @@ def tile_grid(w: int, h: int, tile: int, overlap: float = 0.25) -> list[tuple[in
             return [0]
         step = max(1, int(tile * (1 - overlap)))
         s = list(range(0, n - tile, step))
-        if n - tile - s[-1] < tile // 10:  # the last window would nearly repeat the one before: move that one instead
+        if len(s) > 1 and n - tile - s[-1] < tile // 10:  # keep the first window anchored at the image edge
             s[-1] = n - tile
             return s
         return s + [n - tile]
@@ -157,7 +174,8 @@ def _nms(boxes: list, iou: float = 0.5) -> list:
     return kept
 
 
-def predict_tiled(model, image, imgsz: int, tile: int, conf: float = CONF, full: list | None = None) -> list:
+def predict_tiled(model, image, imgsz: int, tile: int, conf: float = CONF, full: list | None = None,
+                  tile_classes=OBJECT_CLASSES) -> list:
     """Boxes for a large sheet whose symbols are too small at imgsz: doors, windows and fixtures come from overlapping
     tiles of `tile` source pixels (each scaled to imgsz), rooms and floors from the whole-image pass `full`.
 
@@ -178,23 +196,44 @@ def predict_tiled(model, image, imgsz: int, tile: int, conf: float = CONF, full:
         wins = grid[i:i + 8]
         for (x0, y0, x1, y1), r in zip(wins, model.predict([im.crop(g) for g in wins], imgsz=imgsz, conf=conf, verbose=False)):
             for c, s, (a, b, cc, d) in zip(r.boxes.cls.tolist(), r.boxes.conf.tolist(), r.boxes.xyxy.tolist()):
-                if int(c) not in OBJECT_CLASSES:
+                if int(c) not in tile_classes:
                     continue
                 edge = 3
                 if (a < edge and x0 > 0) or (b < edge and y0 > 0) or (cc > x1 - x0 - edge and x1 < w) or (d > y1 - y0 - edge and y1 < h):
                     continue
                 objs.append([int(c), float(s), a + x0, b + y0, cc + x0, d + y0])
-    out = _nms(objs) + [b for b in full if b[0] not in OBJECT_CLASSES]
+    out = _nms(objs) + [b for b in full if b[0] not in tile_classes]
     return [[b[0], round(b[1], 4), *[round(v, 1) for v in b[2:6]]] for b in out]
 
 
 def _cached_run(run: str, image: Path, key: str) -> list:
-    f = CACHE / key / (f"{run}.t{TILE}.json" if tiled(image) else f"{run}.json")
-    if f.exists():
+    suffix = f".t{TILE}.{TILE_CACHE_VERSION}" if tiled(image) else ""
+    return _cached(run, key, suffix, lambda: predict_run(run, image))
+
+
+def _cached(run: str, key: str, suffix: str, compute) -> list:
+    path = weight_file(run)
+    if path is None:
+        raise FileNotFoundError(f"No checkpoint for {run}")
+    version = hashlib.sha256(repr(_weight_version(path)).encode()).hexdigest()[:16]
+    f = CACHE / key / version / f"{run}{suffix}.json"
+    try:
         return json.loads(f.read_text())
-    boxes = predict_run(run, image)
-    f.parent.mkdir(parents=True, exist_ok=True)
-    f.write_text(json.dumps(boxes))
+    except (OSError, ValueError):
+        pass
+    boxes = compute()
+    temp = None
+    try:
+        f.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(mode="w", dir=f.parent, delete=False) as fp:
+            temp = Path(fp.name)
+            json.dump(boxes, fp)
+        temp.replace(f)
+    except OSError as exc:
+        LOG.warning("Could not cache YOLO predictions: %s", exc)
+    finally:
+        if temp is not None:
+            temp.unlink(missing_ok=True)
     return boxes
 
 
@@ -207,7 +246,16 @@ def boxes(run: str | None, image: str | Path) -> dict | None:
     if not runs or not image.is_file():
         return None
     key = image_hash(image)
-    per_run = [_cached_run(m, image, key) for m in runs]
+    predictions = {}
+    for member in runs:
+        try:
+            predictions[member] = _cached_run(member, image, key)
+        except Exception:
+            LOG.exception("YOLO run %s could not read this plan", member)
+    if not predictions:
+        return None
+    runs = list(predictions)
+    per_run = list(predictions.values())
     fused = len(per_run) == 2
     out = fuse(per_run[0], per_run[1]) if fused else per_run[0]
     return {"boxes": out, "runs": runs, "fused": fused, "complete": tuple(runs) == members(run), "hash": key,
@@ -229,16 +277,6 @@ def _n_objects(boxes: list, cfg: dict) -> int:
 
     return sum(len(select_boxes(boxes, q, cfg["yolo_thresholds"][q], cfg["yolo_iou"][q]))
                for q in ("doors", "windows", "toilets", "sinks", "baths"))
-
-
-def _cached(run: str, key: str, mode: str, compute) -> list:
-    f = CACHE / key / f"{run}.{mode}.json"
-    if f.exists():
-        return json.loads(f.read_text())
-    out = compute()
-    f.parent.mkdir(parents=True, exist_ok=True)
-    f.write_text(json.dumps(out))
-    return out
 
 
 def boxes_live(image: str | Path) -> dict | None:
@@ -265,7 +303,11 @@ def boxes_live(image: str | Path) -> dict | None:
         return [[int(c), round(float(s), 4), *[round(float(v), 1) for v in xyxy]]
                 for c, s, xyxy in zip(b.cls.tolist(), b.conf.tolist(), b.xyxy.tolist())]
 
-    full = _cached(run, key, "full", full_pass)
+    try:
+        full = _cached(run, key, f".full{size}", full_pass)
+    except Exception:
+        LOG.exception("Upload detector %s could not read this plan", run)
+        return None
     out, used_tiles = full, False
     from PIL import Image
 
@@ -276,10 +318,36 @@ def boxes_live(image: str | Path) -> dict | None:
             model = _load(run)
             with _lock:
                 return predict_tiled(model, image, size, rule["tile"], full=full)
-        tiles = _cached(run, key, f"t{rule['tile']}", tile_pass)
-        nf, nt = _n_objects(full, cfg), _n_objects(tiles, cfg)
-        if nt >= rule["times"] * max(nf, 1) and nt - nf >= rule["plus"]:
-            out, used_tiles = tiles, True
+        try:
+            tiles = _cached(run, key, f".full{size}.t{rule['tile']}.{TILE_CACHE_VERSION}", tile_pass)
+        except Exception:
+            LOG.exception("Upload detector %s could not read this plan in tiles", run)
+        else:
+            nf, nt = _n_objects(full, cfg), _n_objects(tiles, cfg)
+            if nt >= rule["times"] * max(nf, 1) and nt - nf >= rule["plus"]:
+                out, used_tiles = tiles, True
     return {"boxes": out, "runs": [run], "fused": False, "complete": True, "hash": key, "tiled": used_tiles,
             "selected_on": cfg["selected_on"],
             "cfg": {"yolo_thresholds": cfg["yolo_thresholds"], "yolo_iou": cfg["yolo_iou"]}}
+
+
+SLIDING_CLASSES = ["other_door", "sliding_door"]
+
+
+def sliding_boxes(image: Path, run: str, threshold: float) -> list | None:
+    """Candidate sliding doors in source pixels. The threshold is chosen on validation sheets."""
+    if not available(run):
+        return None
+    try:
+        def predict():
+            model = _load(run, SLIDING_CLASSES)
+            with _lock:
+                r = model.predict(str(image), imgsz=1024, conf=CONF, verbose=False)[0]
+            b = r.boxes
+            return [[int(c), float(s), *xy] for c, s, xy in zip(b.cls.tolist(), b.conf.tolist(), b.xyxy.tolist())]
+
+        boxes = _cached(run, image_hash(image), ".full1024", predict)
+    except Exception:
+        LOG.exception("Sliding-door detector %s could not read this plan", run)
+        return None
+    return [b for b in boxes if b[0] == 1 and b[1] >= threshold]

@@ -50,6 +50,7 @@ class Component:
     length_m: float | None = None
     ports: int = 0
     connected: int = 0
+    system_properties: str = ""
 
     @property
     def kind(self) -> str:
@@ -109,6 +110,13 @@ def _length(el, scale: float) -> float | None:
     return None
 
 
+def _system_properties(el) -> str:
+    import ifcopenshell.util.element as ue
+
+    return " ".join(sorted({str(value) for ps in ue.get_psets(el, psets_only=True, should_inherit=False).values()
+                            for name, value in ps.items() if name.lower().startswith("system") and value}))
+
+
 def _port_owner(f) -> dict[int, int]:
     owner: dict[int, int] = {}
     for rel in f.by_type("IfcRelNests"):
@@ -139,6 +147,8 @@ def network(ifc_file: str) -> Network | None:
         c = Component(el, el.is_a(), _type_name(el), [], st.Name if st is not None else None)
         if el.is_a() in SEGMENTS:
             c.length_m = _length(el, m.length_scale)
+            if c.medium == "pipe":
+                c.system_properties = _system_properties(el)
         comps[el.id()] = c
     systems: dict[str, dict] = {}
     for rel in f.by_type("IfcRelAssignsToGroup"):
@@ -217,7 +227,8 @@ CLASS_WORDS = [
     ("space heater", ("IfcSpaceHeater",), None), ("heizkörper", ("IfcSpaceHeater",), None),
     ("fitting", ("IfcPipeFitting", "IfcDuctFitting", "IfcFlowFitting"), None),
     ("pipe", ("IfcPipeSegment", "IfcFlowSegment"), r"pipe|rohr"), ("duct", ("IfcDuctSegment", "IfcFlowSegment"), r"duct|kanal"),
-    ("valve", ("IfcValve", "IfcFlowController"), r"valve|ventil|hahn|klappe"), ("damper", ("IfcDamper", "IfcFlowController"), r"damper"),
+    ("valve", ("IfcValve", "IfcFlowController"), r"valve|ventil|hahn|klappe|kogelkraan|backflow.preventer|terugstroombeveiliging"),
+    ("damper", ("IfcDamper", "IfcFlowController"), r"damper"),
     ("pump", ("IfcPump", "IfcFlowMovingDevice"), r"pump"), ("fan", ("IfcFan", "IfcFlowMovingDevice"), r"fan|lüfter"),
     ("tank", ("IfcTank", "IfcFlowStorageDevice"), None),
     ("filter", ("IfcFilter", "IfcFlowTreatmentDevice"), None), ("sensor", ("IfcSensor",), None), ("meter", ("IfcFlowMeter",), None),
@@ -226,13 +237,14 @@ CLASS_WORDS = [
     ("terminal", ("IfcSanitaryTerminal", "IfcWasteTerminal", "IfcAirTerminal", "IfcSpaceHeater", "IfcFlowTerminal"), None),
 ]
 GENERIC = ("IfcFlow", "IfcEnergyConversionDevice", "IfcUnitaryEquipment", "IfcDistributionControlElement")
-WATER_SUPPLY = r"cold|hot|domestic|supply|pwc|pwh|trinkwasser|kaltwasser|warmwasser|potable"
+WATER_SUPPLY = (r"cold.water|hot.water|domestic|potable|drinkwater|pwc|pwh|trinkwasser|kaltwasser|warmwasser"
+                r"|water.supply|supply.water")
 INTENTS = [
     ("connected_to", r"(?:connected|attached|linked) to|what (?:feeds|supplies|serves)|upstream|downstream|served by"),
     ("connectivity", r"connectivity|connected|connections?\b|unconnected|disconnected|ports?\b|network integration|open ends?"),
     ("length", r"length|how long|länge|longueur"),
     ("systems", r"which (?:mep )?systems|what (?:mep )?systems|systems? (?:are|is) (?:present|installed|in)|system names|count of systems|systems by"),
-    ("breakdown", r"component|types?|how many|count|breakdown|comprise|inventory|which .* (?:are|is) (?:in|used)|what .* (?:are|is) (?:in|used)|list"),
+    ("breakdown", r"component|types?|how many|count|breakdown|comprise|inventory|which .* (?:are|is) (?:in|used)|what .* (?:are|is) (?:in|used)|list|highlight|mark|show me"),
 ]
 # one room or space named in the question: this agent has no room geometry, so the planner should take it
 ROOM_SCOPED = re.compile(r"\b(?:in|of|inside) (?:the )?(?:room|space|raum)\b|\broom [A-Z]?\d|\bin the (?:bath|kitchen|office)|bathrooms?\b|kitchens?\b", re.I)
@@ -250,11 +262,15 @@ def _scope(net: Network, question: str) -> tuple[list[Component], str] | None:
     None when the question names something this model does not have as a distribution element."""
     q = question.lower()
     comps = net.components
-    supply = re.search(r"water supply|supply pip|domestic water|drinking water|potable|trinkwasser", q)
+    supply = re.search(r"\b(?:water supply|supply pip|water pip|domestic water|drinking water|potable|trinkwasser)", q)
+    temperature = re.search(r"\b(hot|cold) water\b", q)
 
     def narrow(hit: list[Component]) -> list[Component]:
-        if supply:  # supply pipes only: cold / hot domestic water, not waste or heating
-            hit = [c for c in hit if re.search(WATER_SUPPLY, f"{c.type_name} {' '.join(c.systems)}", re.I)]
+        if supply or temperature:
+            pattern = WATER_SUPPLY
+            if temperature:
+                pattern = (r"hot.water|pwh|warmwasser" if temperature[1] == "hot" else r"cold.water|pwc|kaltwasser")
+            hit = [c for c in hit if re.search(pattern, f"{c.type_name} {' '.join(c.systems)} {c.system_properties}", re.I)]
         return hit
 
     for word, classes, type_pat in CLASS_WORDS:
@@ -372,7 +388,7 @@ def answer(path: str, question: str) -> Answer | None:
         lines.append(f"  {kind}: {n} — {detail}")
     if by_level:
         lines.append("By storey: " + _per_storey(comps))
-    plain_count = (re.search(r"^how many\b", question.strip(), re.I) and len(by_cls) == 1
+    plain_count = (re.search(r"^(?:how many|count|highlight|mark|show me)\b", question.strip(), re.I) and len(by_cls) == 1
                    and not re.search(r"breakdown|types?\b|each|\bper\b|\bby\b|distribut", question, re.I))
     value = len(comps) if plain_count else "\n".join(lines)
     return Answer(value, "count" if isinstance(value, int) else None, "mep_breakdown", 0.9,

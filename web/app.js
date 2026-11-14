@@ -680,7 +680,7 @@ function recEl(card) {
     el.append(h("details", { class: "ref", onclick: (ev) => ev.stopPropagation() }, h("summary", {}, "Stoa's reference answer (free text, not scored)"), h("pre", {}, String(r.expected))));
   if (r.overlay.items.length) el.append(takeoffEl(card, on));
   if (r.overlay.legends?.length) el.append(legendEl(card));
-  else if (r.value != null && !["planner", "none"].includes(r.engine.kind))
+  else if (!r.overlay.items.length && r.value != null && !["planner", "none"].includes(r.engine.kind))
     el.append(h("p", { class: "note" }, "Nothing on the sheet could be marked for this answer, so treat it as an estimate."));
   return el;
 }
@@ -903,9 +903,10 @@ async function uploadPlan(file) {
     d = await r.json();
   } catch (e) { msg.textContent = `Upload failed: ${e.message}`; return; }
   const det = d.detector || {};
+  const available = det.upload_available?.length ? det.upload_available : det.available;
   const sheet = d.sheets?.[0] || {};
   const scaled = d.scaled_from ? ` · scaled from ${d.scaled_from[0]}×${d.scaled_from[1]} to ${sheet.width}×${sheet.height} px for reading` : "";
-  msg.textContent = (det.available?.length ? `${file.name} · detectors: ${det.available.join(" + ")}`
+  msg.textContent = (available?.length ? `${file.name} · detectors: ${available.join(" + ")}`
     : `${file.name} · no detector installed on this server: counts fall back to a vision model or are refused`) + scaled;
   await openDrawing(d.id);
 }

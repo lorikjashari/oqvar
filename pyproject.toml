@@ -38,6 +38,13 @@ ocr = [
 torch = { index = "pytorch-cpu" }
 torchvision = { index = "pytorch-cpu" }
 
+[tool.uv]
+# OpenCV's ARM resize backend can crash during OCR (opencv/opencv#29794).
+constraint-dependencies = [
+  "opencv-python<4.13; sys_platform == 'darwin' and platform_machine == 'arm64'",
+  "opencv-python-headless<4.13; sys_platform == 'darwin' and platform_machine == 'arm64'",
+]
+
 [[tool.uv.index]]
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"

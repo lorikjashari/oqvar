@@ -18,7 +18,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import audit, catalog, cubicasa, docqa, explain, graph, legend, llm, mep, planner, router, sheets, vision, xref
+from . import audit, catalog, construction_detect, cubicasa, docqa, explain, graph, legend, llm, mep, planner, router, sheets, uploads, vision, xref
 from .catalog import Drawing
 from .core import Answer, fmt_value
 
@@ -103,6 +103,9 @@ def solve(d: Drawing, question: str, sheet: tuple[str, int] | None = None) -> Re
     question = question.strip()
     exact = d.source in TEMPLATED and any(q["question"].strip() == question for q in catalog.questions_for(d))
     structured = d.source in router.SOLVERS
+    uploaded = uploads.is_upload(d.ask_path)
+    requested_marks = uploaded and re.search(r"\b(highlight|mark|show me|point out)\b", question, re.I)
+    visual_count = uploaded and cubicasa.upload_question_key(question) is not None
     topology = not exact and graph.intent_of(question) is not None
     services = not exact and d.source in ("ifc_models", "ifc_bench") and mep.intent_of(question) is not None
     simple = (d.source in TEMPLATED and not COMPLEX.search(question) and len(question.split()) <= 22 and not topology and not services
@@ -147,7 +150,7 @@ def solve(d: Drawing, question: str, sheet: tuple[str, int] | None = None) -> Re
     if structured and (exact or simple):
         t = time.perf_counter()
         a = router.answer(d.ask_path, question)
-        if a.value is None and d.source == "cubicasa5k" and cubicasa.question_key(question) and llm.available():
+        if a.value is None and not uploaded and d.source == "cubicasa5k" and cubicasa.question_key(question) and llm.available():
             usage += _live_cubicasa_counts(d)
             a = router.answer(d.ask_path, question)
         asked(engine, a, t)
@@ -202,29 +205,49 @@ def solve(d: Drawing, question: str, sheet: tuple[str, int] | None = None) -> Re
         fallback = fallback or a
 
     # 3b. an uploaded raster sheet: the same document clerk over its text, read at full resolution (stoa_qa.sheet_ocr)
-    rows = _upload_rows(d) if pdf is None and llm.available() else None
-    if rows is not None and len(rows) >= 8:
+    tag = docqa.tag_query(question) if uploaded and not visual_count else None
+    trench = uploaded and docqa.TRENCH_LENGTH.search(question)
+    pid = construction_detect.PID_ASK.fullmatch(question) if uploaded else None
+    rows = _upload_rows(d) if pdf is None and not visual_count and (tag or trench or pid or llm.available()) else None
+    if rows and (tag or trench):
+        t = time.perf_counter()
+        a = docqa.tagged_count(tag, rows) if tag else docqa.printed_trench_length(question, rows)
+        if a is not None:
+            asked("document", a, t)
+            return done(a, "document", "Matched the evidence against the printed text")
+    if pid and rows:
+        t = time.perf_counter()
+        a = construction_detect.pid_answer(uploads.resolve(d.ask_path), pid, rows)
+        if a is not None:
+            asked("detection", a, t)
+            return done(a, "detection", "Candidate equipment symbols located on the uploaded sheet")
+    if rows is not None and len(rows) >= 8 and llm.available():
         t = time.perf_counter()
         a, u = docqa.ask(d.ask_path, question, rows=rows)
         usage += _usage(u)
         asked("document", a, t, tokens(u))
-        if a.value is not None:
+        if a.value is not None and (not requested_marks or any(e.coords for e in a.evidence)):
             return done(a, "document", f"Rows of the sheet's text (read by OCR at full resolution) selected by "
                                        f"{llm.MODEL.split('/')[-1]}, counted by us")
         fallback = fallback or a
 
     # 4. vision on the sheet
     raster = primary_raster(d)
+    if (uploaded and fallback is not None and fallback.intent == "unreadable"
+            and cubicasa.upload_question_key(question) in ("bathrooms", "toilets", "sinks", "showers", "bathtubs", "baths")):
+        return done(fallback, "none", "")
     if raster is not None and llm.available():
         kind, path, page = raster
         t = time.perf_counter()
         img = sheets.raster_path(kind, path, page)
         a, u = vision.ask(img, question, sheets.image_size(kind, path, page), cache_key=f"{path}|{page}")
         usage += _usage(u)
+        if uploaded and (requested_marks or visual_count or a.unit == "count"):
+            a = vision.require_marks(a, count=visual_count or a.unit == "count" or bool(COUNT_Q.search(question)))
         asked("vision", a, t, tokens(u))
         if a.value is not None:
             return done(a, "vision", f"Read from the sheet by {llm.MODEL.split('/')[-1]}")
-        fallback = fallback or a
+        fallback = a if a.intent == "unverified_marks" else (fallback or a)
 
     a = fallback or Answer(None, None, "unknown", 0.0, "No engine can answer this for this drawing yet.")
     return done(a, "none", "")
@@ -261,8 +284,7 @@ def _live_cubicasa_counts(d: Drawing) -> list[dict]:
 
     cache = REPO / "eval_out/gemini" / llm.MODEL.replace("/", "__")
     cache.mkdir(parents=True, exist_ok=True)
-    path = str(sheets.safe_path(d.ask_path)) if d.ask_path.startswith("uploads/") else d.ask_path  # DATASET / absolute = absolute
-    r = cg.ask_featherless(llm.MODEL, llm.api_key(), path, 1536, cache)
+    r = cg.ask_featherless(llm.MODEL, llm.api_key(), d.ask_path, 1536, cache)
     u = r.get("usage") or {}
     if "error" in r or not u:
         return []

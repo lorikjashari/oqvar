@@ -57,6 +57,13 @@ def test_mep_breakdown_lengths_systems_and_ports(ask_mep):
     assert "connects to 2 component(s)" in a.value
 
 
+def test_mep_highlights_water_supply_pipes_and_valves(ask_mep):
+    pipes = ask_mep("Highlight all water pipes")
+    assert pipes.value == 2 and len(pipes.evidence) == 2
+    valves = ask_mep("Highlight all valves")
+    assert valves.value == 1 and len(valves.evidence) == 1
+
+
 def test_mep_leaves_other_questions_to_the_planner():
     from stoa_qa import mep
 

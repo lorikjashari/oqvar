@@ -27,7 +27,7 @@ KEY_PATTERNS = [
     ("sinks", r"\bsinks?\b|wash ?basin|allas"),
     ("baths", r"shower|bathtub|suihku|kylpyamme"),
     ("toilets", r"toilet bowl|wc seat|wc-istuin|\btoilets?\b(?! ?rooms?)"),  # plain "toilets" too; "toilet rooms" = wc_rooms
-    ("bathrooms", r"bathroom|washroom|pesuhuone|kylpyhuone"),
+    ("bathrooms", r"bathroom|washroom|en[- ]?suite|pesuhuone|kylpyhuone"),
     ("wc_rooms", r"wc rooms?|toilet rooms?|wc-tila"),
     ("kitchens", r"kitchen|keittiö"),
     ("bedrooms", r"bedroom|makuuhuone"),
@@ -38,10 +38,12 @@ KEY_PATTERNS = [
     ("floors", r"\bfloors\b|storeys?|kerrosta|kerroksia"),
 ]
 LABELS = {"doors": "door", "windows": "window", "floors": "floor", "toilets": "toilet", "sinks": "sink",
-          "baths": "shower/bathtub", "saunas": "sauna", "kitchens": "kitchen", "bedrooms": "bedroom",
+          "baths": "shower/bathtub", "showers": "shower", "bathtubs": "bathtub",
+          "saunas": "sauna", "kitchens": "kitchen", "bedrooms": "bedroom",
           "wc_rooms": "WC room", "bathrooms": "bathroom", "balconies": "balcony"}
 NOUNS = {"doors": ("door", "doors"), "windows": ("window", "windows"), "floors": ("floor", "floors"), "toilets": ("toilet bowl", "toilet bowls"),
-         "sinks": ("sink", "sinks"), "baths": ("shower or bathtub", "showers and bathtubs"), "saunas": ("sauna", "saunas"),
+         "sinks": ("sink", "sinks"), "baths": ("shower or bathtub", "showers and bathtubs"),
+         "showers": ("shower", "showers"), "bathtubs": ("bathtub", "bathtubs"), "saunas": ("sauna", "saunas"),
          "kitchens": ("kitchen", "kitchens"), "bedrooms": ("bedroom", "bedrooms"), "wc_rooms": ("separate WC room", "separate WC rooms"),
          "bathrooms": ("bathroom", "bathrooms"), "balconies": ("balcony", "balconies")}
 READER = {"network": "the CubiCasa network", "gemma": "Gemma 4", "gemini": "Gemini 3.5 Flash", "yolo": "the detector",
@@ -58,6 +60,36 @@ NET_ICON = {"doors": ["Door"], "windows": ["Window"], "toilets": ["Toilet"], "si
 def question_key(q: str) -> str | None:
     ql = q.lower()
     return next((k for k, pat in KEY_PATTERNS if re.search(pat, ql)), None)
+
+
+_UPLOAD_COUNT = re.compile(
+    r"how many (?P<object>sliding doors|doors|windows|bedrooms|bathrooms|washrooms|en[- ]?suites|(?:separate )?wc rooms|kitchens|toilets|toilet bowls|sinks|"
+    r"wash ?basins|showers and bathtubs|showers|bathtubs|saunas|balconies|floors|storeys)"
+    r"(?: are(?: there| (?:drawn|shown))?)?(?: (?:on|in) (?:this|the) (?:floor plan|plan|drawing|sheet|floor))?[?.]*",
+    re.I,
+)
+_UPLOAD_FINNISH_COUNT = re.compile(
+    r"(?:kuinka monta|montako) (?P<object>ovea|ikkunaa|makuuhuonetta|saunaa|kerrosta|wc-istuinta|pesuallasta|"
+    r"kylpyhuonetta|suihkua|kylpyammetta)"
+    r"(?: (?:tässä )?pohjapiirustuksessa(?: on)?| on(?: tässä pohjapiirustuksessa)?)?[?.]*",
+    re.I,
+)
+
+
+def upload_question_key(question: str) -> str | None:
+    """Uploads support counts over the whole image. Scoped questions need another reader."""
+    question = question.strip()
+    question = re.sub(r"^(?:please\s+)?(?:highlight|mark|show me|count) (?:all |the )?", "how many ", question, flags=re.I)
+    question = re.sub(r"[, ]+and (?:highlight|mark) (?:them|each one|each of them)(?: on (?:this|the) (?:plan|drawing|sheet))?[?.]*$",
+                      "?", question, flags=re.I)
+    match = _UPLOAD_COUNT.fullmatch(question) or _UPLOAD_FINNISH_COUNT.fullmatch(question)
+    if match:
+        text = match["object"].lower()
+        special = {"sliding doors": "sliding_doors", "showers": "showers", "bathtubs": "bathtubs",
+                   "suihkua": "showers", "kylpyammetta": "bathtubs", "kylpyhuonetta": "bathrooms"}
+        if text in special:
+            return special[text]
+    return question_key(match["object"]) if match else None
 
 
 @lru_cache(maxsize=1)
@@ -104,16 +136,16 @@ def image_of(path: str) -> Path | None:
 
 def predictions_for(path: str) -> dict[str, dict]:
     """predictions() for a plan given by path, so a plan without precomputed boxes can be detected live."""
-    return predictions(Path(path).stem, image_of(path))
+    return predictions(Path(path).stem, image_of(path), include_cached=not path.startswith("uploads/"))
 
 
-def predictions(stem: str, image: Path | None = None) -> dict[str, dict]:
+def predictions(stem: str, image: Path | None = None, *, include_cached: bool = True) -> dict[str, dict]:
     """All available source predictions for one plan: {source: {"counts": {...}, ...}}.
 
     Without precomputed detector boxes for `stem`, the picked YOLO run is executed on `image` when its weights and
     ultralytics are installed (stoa_qa.cubicasa_live); those boxes carry a "live" entry saying which models ran."""
     out = {}
-    net = _json(REPO / "third_party/cubicasa_preds" / f"{stem}.json")
+    net = _json(REPO / "third_party/cubicasa_preds" / f"{stem}.json") if include_cached else None
     if net and "counts" in net:
         seg = _seg_index().get(stem)
         net = {**net, "counts": refine.apply(net, seg)}
@@ -121,12 +153,12 @@ def predictions(stem: str, image: Path | None = None) -> dict[str, dict]:
             net["boxes"] = seg["boxes"]
         out["network"] = net
     for src, d in (("gemma", "google__gemma-4-31B-it"), ("gemini", "gemini-3.5-flash")):
-        r = _json(REPO / "eval_out/gemini" / d / f"{stem}.json")
+        r = _json(REPO / "eval_out/gemini" / d / f"{stem}.json") if include_cached else None
         if r and "counts" in r:
             out[src] = r
     cfg = picks()
     for src, pre in DETECTORS.items():
-        if cfg.get(f"{pre}_run"):
+        if include_cached and cfg.get(f"{pre}_run"):
             boxes = _yolo_boxes(cfg[f"{pre}_run"]).get(stem)
             if boxes is not None:
                 qs = TILE_QUESTIONS if src == "tiles" else YOLO_Q
@@ -142,6 +174,7 @@ def predictions(stem: str, image: Path | None = None) -> dict[str, dict]:
             lcfg = live.get("cfg") or cfg
             boxes = live["boxes"]
             info = {k: live.get(k) for k in ("runs", "fused", "complete", "hash", "tiled", "selected_on")}
+            info["readable_objects"] = readable(boxes, lcfg)
             from . import plan3d
 
             if plan3d.available():  # doors and windows must sit in a wall: on a new drawing, others are misread furniture
@@ -150,13 +183,17 @@ def predictions(stem: str, image: Path | None = None) -> dict[str, dict]:
                 if off:  # scored 0, not removed: a box's index stays its 3D id
                     boxes = [[b[0], 0.0, *b[2:]] if k in off else b for k, b in enumerate(boxes)]
                     info["off_wall"] = len(off)
-            counts = {q: len(_yolo_selected(boxes, q, lcfg)) for q in YOLO_Q}
+            questions = YOLO_Q if include_cached else (*YOLO_Q, "showers", "bathtubs")
+            counts = {q: len(_yolo_selected(boxes, q, lcfg)) for q in questions}
             out["yolo"] = {"counts": counts, "boxes": boxes, "cfg": lcfg, "live": info}
     return out
 
 
 def _yolo_selected(boxes: list, key: str, cfg: dict, pre: str = "yolo") -> list:
     """The detector boxes counted for one question, with the threshold and overlap cut chosen on val."""
+    if key in ("showers", "bathtubs"):
+        fixture = YOLO_CLASSES.index(key.removesuffix("s"))
+        return [b for b in _yolo_selected(boxes, "baths", cfg, pre) if b[0] == fixture]
     return rules.select_boxes(boxes, key, (cfg.get(f"{pre}_thresholds") or {}).get(key, 0.5),
                               (cfg.get(f"{pre}_iou") or {}).get(key, 1.0))
 
@@ -222,18 +259,36 @@ def readable(live_boxes: list, cfg: dict) -> int:
 
 def answer(path: str, question: str) -> Answer:
     stem = Path(path).stem
-    key = question_key(question)
+    uploaded = path.startswith("uploads/")
+    key = upload_question_key(question) if uploaded else question_key(question)
     if key is None:
         return Answer(None, None, "unknown", 0.0, "cubicasa: question not understood", source_file=path)
-    if path.startswith("uploads/") and key in LABELLED_ROOMS:
+    if key == "sliding_doors":
+        return _sliding_answer(path)
+    if uploaded and key in LABELLED_ROOMS:
         by_legend = _legend_answer(path, key)  # a colour-coded sheet: its legend says which drawn rooms are which
         if by_legend is not None:
             return by_legend
+    if uploaded:
+        from . import fixture_context
+
+        image = image_of(path) if key in fixture_context.QUESTION_CLASSES else None
+        contextual = fixture_context.answer(image, path, key) if image is not None else None
+        if contextual is not None:
+            if key in ("bathrooms", "wc_rooms") and contextual.unit == "count":
+                from .cubicasa_live import image_hash
+
+                rescued = _label_rescue(path, key, {"hash": image_hash(image)}, contextual.evidence)
+                if rescued is not None:
+                    return rescued
+            return contextual
     preds = predictions_for(path)
     cfg = picks()
     live = (preds.get("yolo") or {}).get("live")
     ycfg = (preds.get("yolo") or {}).get("cfg") or cfg  # the thresholds of whichever detector produced the boxes
-    if live and (n := readable(preds["yolo"]["boxes"], ycfg)) < MIN_READ:
+    if live and (n := live["readable_objects"] if "readable_objects" in live else readable(preds["yolo"]["boxes"], ycfg)) < MIN_READ:
+        if uploaded and key in LABELLED_ROOMS and (rescued := _label_rescue(path, key, live)):
+            return rescued
         return Answer(None, "count", "unreadable", 0.0,
                       f"The plan detectors cannot read this drawing: they found {n} confident door, window or fixture "
                       f"symbol{'s' if n != 1 else ''} on the whole sheet. They learned from residential plans; this style or "
@@ -242,6 +297,8 @@ def answer(path: str, question: str) -> Answer:
     order = [cfg["picks"].get(key)] + ["tiles", "yolo", "gemini", "gemma", "network"]
     src = next((s for s in order if s and s in preds and key in preds[s]["counts"]), None)
     if src is None:
+        if uploaded and key in LABELLED_ROOMS and (rescued := _label_rescue(path, key, {})):
+            return rescued
         return Answer(None, "count", key, 0.0, f"no prediction available for {stem} (run the sources first)", source_file=path)
     value = int(preds[src]["counts"][key])
     votes = [int(p["counts"][key]) for s, p in preds.items() if key in p["counts"]]
@@ -259,14 +316,25 @@ def answer(path: str, question: str) -> Answer:
         for helper in ("tiles", "yolo", "network"):
             if helper in preds and helper != src:
                 shapes = [e for e in _evidence(helper, key, preds[helper], ycfg if helper == "yolo" else cfg) if e.coords]
-                if shapes:
+                if shapes and len(shapes) == value:
                     ev = shapes
                     method += f" The marks on the sheet are {READER[helper]}'s {len(shapes)} detections."
                     break
-    if live and value == 0 and key in LABELLED_ROOMS:
-        rescued = _label_rescue(path, key, live)
+    if live and key in LABELLED_ROOMS and (value == 0 or (uploaded and key in ("bathrooms", "wc_rooms") and src == "yolo")):
+        rescued = _label_rescue(path, key, live, ev if value > 0 else None)
         if rescued is not None:
             return rescued
+    if uploaded and key == "bathrooms" and live and src == "yolo":
+        rescued = _fixture_bathrooms(path, preds[src]["boxes"], ycfg, ev)
+        if rescued is not None:
+            return rescued
+        if value == 0:
+            candidates = _bathroom_candidates(path)
+            if candidates is not None:
+                return candidates
+            return Answer(None, "count", "unreadable", 0.0,
+                          "The detector could not locate any bathroom rooms using symbols, labels or fixtures.",
+                          source_file=path)
     return Answer(value, "count", key, conf, method, ev, path)
 
 
@@ -300,7 +368,7 @@ def _legend_answer(path: str, key: str) -> Answer | None:
     return Answer(n, "count", key, 0.8, method, ev, path)
 
 
-def _label_rescue(path: str, key: str, live: dict) -> Answer | None:
+def _label_rescue(path: str, key: str, live: dict, detected: list[Evidence] | None = None) -> Answer | None:
     """The detector found no room of this type, but the plan prints labels naming such rooms: count the labels.
 
     Only as a rescue: on CubiCasa val (_analysis/room_labels_eval.py) printed labels alone are far worse than the detector
@@ -315,6 +383,11 @@ def _label_rescue(path: str, key: str, live: dict) -> Answer | None:
     if not c or not c["labels"]:
         return None
     rooms = room_labels.rooms_of(image, c["labels"])  # the walled room each label names; two labels in one room = one
+    if detected:
+        detections = [e.coords for e in detected if e.kind == "box" and e.coords]
+        rooms = [r for r in rooms if r["poly"] and not any(_same_room(r["bbox"], box) for box in detections)]
+        if not rooms:
+            return None
     n = len(rooms)
     names = ", ".join(f"'{ln['text']}'" for ln in c["labels"][:6])
     walled = sum(r["poly"] is not None for r in rooms)
@@ -326,4 +399,81 @@ def _label_rescue(path: str, key: str, live: dict) -> Answer | None:
           Evidence("box", f"label-{i}", f"printed '{r['labels'][0]['text']}'", r["labels"][0].get("conf"),
                    [[r["bbox"][0], r["bbox"][1]], [r["bbox"][2], r["bbox"][3]]])
           for i, r in enumerate(rooms)]
+    if detected:
+        return Answer(len(detected) + n, "count", key, 0.5,
+                      f"Detected {len(detected)} from symbols and added {n} enclosed rooms from their printed labels.",
+                      detected + ev, path)
     return Answer(n, "count", key, 0.7, method, ev, path)
+
+
+def _same_room(bounds: list[float], box: list[list[float]]) -> bool:
+    x0, y0, x1, y1 = bounds
+    (a, b), (c, d) = box
+    overlap = max(0, min(x1, c) - max(x0, a)) * max(0, min(y1, d) - max(y0, b))
+    return overlap > 0.4 * min((x1 - x0) * (y1 - y0), (c - a) * (d - b))
+
+
+def _fixture_bathrooms(path: str, boxes: list, cfg: dict, detected: list[Evidence]) -> Answer | None:
+    """Find enclosed rooms supported by fixtures or a classifier centered on the toilet."""
+    from . import cubicasa_live, room_labels, wet_room
+
+    image = image_of(path)
+    if image is None:
+        return None
+    toilets = [{"text": "toilet", "box": b[2:6]} for b in _yolo_selected(boxes, "toilets", cfg)]
+    if not toilets:
+        return None
+    fixtures = [{"text": "bath", "box": b[2:6]} for b in _yolo_selected(boxes, "baths", cfg)]
+    model = (cubicasa_live.live_config() or {}).get("wet_rooms")
+    if model:
+        scores = wet_room.bath_scores(image, [t["box"] for t in toilets], model["run"])
+        for toilet, score in zip(toilets, scores or []):
+            toilet["bathroom"] = score >= model["threshold"]
+    if not fixtures and not any(t.get("bathroom") for t in toilets):
+        return None
+    try:
+        rooms = room_labels.rooms_of(image, toilets + fixtures)
+    except ImportError:
+        return None
+    matched = [r for r in rooms if r["poly"] and (len({f["text"] for f in r["labels"]}) == 2
+               or any(f.get("bathroom") for f in r["labels"]))
+               and not any(e.kind == "box" and e.coords and _same_room(r["bbox"], e.coords) for e in detected)]
+    if not matched:
+        return None
+    evidence = detected + [Evidence("polygon", f"wet-fixtures-{i}", f"Bathroom {i + 1}", None, r["poly"])
+                           for i, r in enumerate(matched, start=len(detected))]
+    return Answer(len(evidence), "count", "bathrooms", 0.5,
+                  "Estimated from enclosed rooms with a toilet and bathroom fixtures or a matching bathroom layout.",
+                  evidence, path)
+
+
+def _sliding_answer(path: str) -> Answer:
+    from . import cubicasa_live
+
+    image = image_of(path)
+    cfg = (cubicasa_live.live_config() or {}).get("sliding")
+    boxes = cubicasa_live.sliding_boxes(image, cfg["run"], cfg["threshold"]) if image is not None and cfg else None
+    if not boxes:
+        return Answer(None, "count", "sliding_doors", 0.0, "No sliding-door symbols could be confirmed by the detector.",
+                      source_file=path)
+    evidence = [Evidence("box", f"sliding-{i}", f"Likely sliding door {i + 1}", b[1], [b[2:4], b[4:6]])
+                for i, b in enumerate(boxes)]
+    return Answer(f"{len(evidence)} possible sliding door{'s' if len(evidence) != 1 else ''}", None, "sliding_doors", 0.35,
+                  "These are the openings the sliding-door model flagged for review.",
+                  evidence, path)
+
+
+def _bathroom_candidates(path: str) -> Answer | None:
+    from . import construction_detect, fixture_context
+
+    image = image_of(path)
+    if image is not None and (contextual := fixture_context.answer(image, path, "bathrooms", candidates_only=True)):
+        return contextual
+    boxes = construction_detect.wet_room_boxes(image, "bathroom") if image is not None else None
+    if not boxes:
+        return None
+    evidence = [Evidence("box", f"bath-box-{i}", f"Possible bathroom {i + 1}", b[1], [b[2:4], b[4:6]])
+                for i, b in enumerate(boxes)]
+    return Answer(f"{len(evidence)} possible bathroom{'s' if len(evidence) != 1 else ''}", None, "bathroom_candidates",
+                  0.45, "Candidate rooms located at higher resolution. Review the marked rooms before using a total.",
+                  evidence, path)

@@ -98,6 +98,14 @@ uv sync --extra detect --extra ocr --extra raster   # detectors, sheet text (OCR
 modal token new                              # once, if this machine has no Modal login
 # the upload detector (trained on CubiCasa + Swiss sheets; thresholds in stoa_qa/cubicasa_live_picks.json):
 uv run modal volume get stoa-cubicasa runs/mixed-m13/weights/best.pt third_party/weights/mixed-m13.pt
+# optional bathroom and sliding-door specialists for uploaded plans:
+uv run modal volume get stoa-cubicasa runs/wet-room-v2/weights/best.pt third_party/weights/wet-room-v2.pt
+uv run modal volume get stoa-cubicasa runs/bathroom-boxes-v1/weights/best.pt third_party/weights/bathroom-boxes-v1.pt
+uv run modal volume get stoa-cubicasa releases/fixture-context-dorm-final.pt third_party/weights/fixture-context-dorm-final.pt
+uv run modal volume get stoa-cubicasa runs/fixture-context-v1/weights/best.pt third_party/weights/fixture-context-v1.pt
+uv run modal volume get stoa-cubicasa runs/sliding-v1/weights/best.pt third_party/weights/sliding-v1.pt
+# optional valve and instrumentation candidate overlays for titled piping diagrams:
+uv run modal volume get stoa-cubicasa runs/pid2graph-symbols-v1/weights/best.pt third_party/weights/pid2graph-symbols-v1.pt
 # the fused pair (used when mixed-m13 is missing, and for CubiCasa plans without precomputed boxes):
 uv run modal volume get stoa-cubicasa runs/m13-1280/weights/best.pt third_party/weights/m13-1280.pt
 uv run modal volume get stoa-cubicasa runs/local-y11s-13c/weights/best.pt third_party/weights/local-y11s-13c.pt
@@ -109,12 +117,20 @@ detects in 960 px tiles only when that finds far more objects (dense sheets with
 whichever of the two older models is present (both → fused like the offline run; one → used alone, and the answer says
 the count is less certain).
 
+`stoa_qa/cubicasa_live.py` also finds checkpoints directly under `eval_out/yolo_runs/<run>/weights/best.pt`.
+Start the app with `uv run --extra detect --extra ocr --extra raster uvicorn stoa_qa.api:app --port 8765`.
+Check `/api/config` for the configured detector members and the checkpoints found locally.
+
 **Text and rooms on uploaded sheets** (`--extra ocr`). `stoa_qa/sheet_ocr.py` reads an uploaded sheet's text at full
 resolution (in tiles, plus a pass turned 90° for title blocks) right after upload, about 20-25 s on CPU, cached in
 `eval_out/ocr/`. The document clerk then answers from it (schedules, room-count and area tables, notes, sheet number,
 scale), highlighting the rows it used. Room-type questions use the sheet's colour legend when it has one
 (`stoa_qa/legend_rooms.py`: rooms filled with the legend colour of e.g. DORMITORY), then the detector, then printed room
-names resolved to their walled room (`stoa_qa/room_labels.py`). Uploads up to 250 MP / 100 MB (PNG, JPEG, WebP, TIFF,
+names resolved to their walled room (`stoa_qa/room_labels.py`). The bathroom specialist classifies a crop around each
+detected toilet and marks distinct enclosed rooms. Sliding-door answers show candidate openings for review.
+On dense uploads, the joint detector uses higher-resolution crops and checks bathroom boxes against the
+toilets, sinks, showers, and tubs inside them. The app shows fixture groups as candidates if it cannot resolve the room outline.
+Uploads up to 250 MP / 100 MB (PNG, JPEG, WebP, TIFF,
 BMP); a sheet whose long side is over 4,000 px is stored scaled to 4,000 px. Without the `ocr` extra these readers are
 skipped and the app falls back to the detector and the vision model. Boxes are cached in `eval_out/yolo/live/`; uploads are
 stored in `eval_out/uploads/` (both gitignored). `STOA_YOLO_WEIGHTS` points to another weights folder,

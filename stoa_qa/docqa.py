@@ -107,6 +107,83 @@ OCR_NOTE = ("\n(The text was read by OCR from an image of the sheet: spaces are 
 ITEMS_FIELD = ('\n "items": [<for a count: the exact printed tag or label of each counted item, one string per item, '
                'e.g. ["CV-1", "CV-2"]; for lookup: []>],')
 
+TAG = re.compile(r"\b([A-Z]{1,8})\s*[-‐‑–]\s*(\d+[A-Z]?)\b", re.I)
+TAG_COUNT = re.compile(
+    r"(?:(?:how many|count)|(?:please\s+)?(?:highlight|mark|show me)(?: all| the)?)\s+"
+    r"(?P<item>[a-z -]+?)(?:\s*\((?P<prefix>[A-Z]{1,8})\))?"
+    r"(?: are (?:there|shown|drawn))?(?: (?:on|in) (?:this|the) (?:piping plan|plan|drawing|sheet))?[?.]*",
+    re.I,
+)
+PIPING_TAGS = {"check valves": ("CV",), "fuel pumps": ("FP",), "filter separators": ("FSI", "FSR")}
+TRENCH_LENGTH = re.compile(r"\b(?:how long|length)\b.*\bpipe trench\b|\bpipe trench\b.*\blength\b", re.I)
+
+
+def tag_query(question: str):
+    query = TAG_COUNT.fullmatch(question.strip())
+    if query and not re.search(r"\b(?:in|on|at|near|between|from|to|above|below|with|without|are|is)\b", query["item"], re.I):
+        return query
+    return None
+
+
+def _tag_box(part: dict, match: re.Match) -> list[float]:
+    x0, y0, x1, y1 = part["bbox"]
+    if (x1 - x0) > (y1 - y0):
+        width = (x1 - x0) / len(part["text"])
+        x1 = x0 + match.end() * width
+        x0 += match.start() * width
+    return [round(x0, 1), round(y0, 1), round(x1, 1), round(y1, 1)]
+
+
+def tagged_count(query: re.Match, rows: list[dict]) -> Answer | None:
+    prefix = query["prefix"]
+    uses_equipment_ids = any("fuelingsystemtypeiii" in _key(r["text"]) for r in rows)
+    if prefix:
+        # Repeated plumbing fixture tags are type marks, not unique equipment identifiers.
+        if not uses_equipment_ids and not re.search(r"\b(?:distinct|unique)\b", query["item"], re.I):
+            return None
+        prefixes = (prefix.upper(),)
+    else:
+        prefixes = PIPING_TAGS.get(query["item"].strip().lower())
+        # These implicit names belong to this drawing standard. Other sheets can name a prefix explicitly.
+        if not prefixes or not uses_equipment_ids:
+            return None
+
+    # A tag can appear more than once. Prefer its standalone annotation over a mention in a note.
+    found = {}
+    for row in rows:
+        for part in row.get("parts", []):
+            value = part["text"].strip()
+            tags = list(TAG.finditer(part["text"]))
+            if not tags or TAG.sub("", value).strip(" |,;"):
+                continue
+            for tag in tags:
+                if tag[1].upper() in prefixes:
+                    name = f"{tag[1].upper()}-{tag[2].upper()}"
+                    if name not in found or len(value) < found[name][0]:
+                        found[name] = (len(value), row["id"], _tag_box(part, tag))
+    if not found:
+        return None
+    evidence = [Evidence("box", row_id, name, None, [b[:2], b[2:]]) for name, (_, row_id, b) in sorted(found.items())]
+    return Answer(len(evidence), "count", "doc_count", 0.7,
+                  f"Counted {len(evidence)} distinct printed {' / '.join(prefixes)} equipment tags.", evidence)
+
+
+def printed_trench_length(question: str, rows: list[dict]) -> Answer | None:
+    if not TRENCH_LENGTH.search(question) or re.search(
+        r"\b(total|all|combined|exact|(?:milli|centi)?met(?:er|re)s?|feet|foot|inch(?:es)?|mm|cm|m|ft)\b",
+        question, re.I,
+    ):
+        return None
+    for row in rows:
+        for part in row.get("parts", []):
+            match = re.match(r"^PIPE\s*TRENCH\s*LENGTH\s*[-:=]\s*(\d+)(?:\s*\(|\s*$)", part["text"], re.I)
+            if match:
+                b = part["bbox"]
+                ev = Evidence("box", row["id"], part["text"], None, [b[:2], b[2:]])
+                return Answer(int(match[1]), None, "doc_lookup", 0.7,
+                              "Read the approximate pipe trench length printed in the sheet notes.", [ev])
+    return None
+
 
 def _key(t: str) -> str:
     return re.sub(r"[^a-z0-9]", "", t.lower())
@@ -120,7 +197,18 @@ def _counted_items(items: list, rows: list[dict]) -> list[tuple[str, dict, list]
         k = _key(str(it))
         if not k:
             continue
+        tag = TAG.fullmatch(str(it).strip().upper())
         for r in rows:
+            if tag is not None:
+                for part in r.get("parts", []):
+                    hit = next((m for m in TAG.finditer(part["text"].upper()) if m.groups() == tag.groups()), None)
+                    if hit is not None and (id(part), k) not in used:
+                        used.add((id(part), k))
+                        out.append((str(it), r, _tag_box(part, hit)))
+                        break
+                else:
+                    continue
+                break
             part = next((pt for pt in r.get("parts", []) if k in _key(pt["text"]) and (id(pt), k) not in used), None)
             if part is not None:
                 used.add((id(part), k))
@@ -176,13 +264,15 @@ def ask(rel: str, question: str, page: int = 0, rows: list[dict] | None = None) 
             items = [it for it in items if re.match(rf"^{prefix.group(1)}[\s\-#.]*\d", str(it).strip(), re.I)]
         found = _counted_items(items, picked or rows)
         if found:
-            ev = [Evidence("box", f"{r['id']}-{i}", it, None, [[round(b[0] - 3, 1), round(b[1] - 3, 1)], [round(b[2] + 3, 1), round(b[3] + 3, 1)]])
-                  for i, (it, r, b) in enumerate(found)]
+            ev = [Evidence("box", r["id"], it, None, [[round(b[0] - 3, 1), round(b[1] - 3, 1)], [round(b[2] + 3, 1), round(b[3] + 3, 1)]])
+                  for it, r, b in found]
             missing = len({_key(str(x)) for x in items if _key(str(x))} - {_key(it) for it, _, _ in found})
             miss = f"; {missing} listed item(s) not found in the sheet text were not counted" if missing else ""
             return Answer(len(found), "count", "doc_count", 0.7,
                           f"Counted {len(found)} printed items on the sheet ({', '.join(it for it, _, _ in found[:8])}"
                           f"{', ...' if len(found) > 8 else ''}){miss}" + (f" · {note}" if note else ""), ev), usage
+        if prefix or any(TAG.fullmatch(str(it).strip()) for it in items):
+            return Answer(None, "count", "doc_count", 0.0, "No matching equipment tags were verified in the sheet text."), usage
     if d.get("kind") == "count":
         return Answer(len(picked), "count", "doc_count", 0.7 if picked else 0.4,
                       f"Counted {len(picked)} rows of the sheet's text selected for the question" + (f" · {note}" if note else ""), ev), usage

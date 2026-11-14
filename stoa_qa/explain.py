@@ -46,6 +46,8 @@ def _words(text: str) -> set[str]:
 def category(answer: Answer, trace: list[dict], llm_ok: bool) -> str:
     if answer.intent == "scoped":  # stoa_qa.scope: the question names a room / apartment we could not pin down
         return "ambiguous"
+    if answer.intent == "unverified_marks":
+        return "unverified_marks"
     if answer.intent == "unreadable":  # stoa_qa.cubicasa.readable: a count of 0 would have been a blind guess
         return "unreadable"
     notes = " ".join([answer.method or ""] + [t.get("note") or "" for t in trace]).lower()
@@ -69,6 +71,7 @@ def category(answer: Answer, trace: list[dict], llm_ok: bool) -> str:
 
 
 HEADLINE = {
+    "unverified_marks": "I couldn't locate the requested items on this drawing",
     "not_in_data": "This drawing doesn't contain that information",
     "not_understood": "I couldn't match this question to what the drawing contains",
     "needs_llm": "Free-form questions need the language model, which isn't set up",
@@ -77,6 +80,7 @@ HEADLINE = {
     "unreadable": "The detectors can't read this drawing, so I won't guess a count",
 }
 NEXT = {
+    "unverified_marks": "Try a sharper drawing or crop to the area you want to inspect.",
     "not_in_data": "Ask about something the drawing does hold, or check another sheet of the same project.",
     "not_understood": "Try one of the questions below, or name the room, storey or element the way the drawing labels it.",
     "needs_llm": "Add FEATHERLESS_API_KEY to .env for free-form questions; the questions below work without it.",

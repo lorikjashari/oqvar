@@ -109,7 +109,12 @@ def config():
 def _detector() -> dict:
     """Which YOLO runs can be executed here on plans without precomputed boxes (stoa_qa.cubicasa_live)."""
     run = cubicasa.picks().get("yolo_run")
-    return {"run": run, "members": list(cubicasa_live.members(run)), "available": cubicasa_live.available_runs(run)}
+    members = list(cubicasa_live.members(run))
+    upload_run = (cubicasa_live.live_config() or {}).get("run")
+    return {"run": run, "members": members, "available": cubicasa_live.available_runs(run),
+            "upload_available": cubicasa_live.available_runs(upload_run),
+            "missing_weights": [m for m in members if cubicasa_live.weight_file(m) is None],
+            "ultralytics": cubicasa_live.has_ultralytics()}
 
 
 @app.get("/api/drawings")
@@ -211,11 +216,15 @@ def _upload_detail(d: catalog.Drawing) -> dict:
     s = d.sheets[0]
     w, h = sheets.image_size("image", s.path)
     det = _detector()
-    if det["available"]:
-        note = f"Counted by the YOLO11 plan detectors run on this image ({' + '.join(det['available'])})."
+    available = det["upload_available"] or det["available"]
+    if available:
+        note = f"Whole-plan counts can use {' + '.join(available)}. Check each mark on the drawing."
+    elif det["missing_weights"]:
+        note = "YOLO checkpoints are missing on this server. Image-reader answers are estimates."
+    elif not det["ultralytics"]:
+        note = "Start the server with the detect extra to enable YOLO. Image-reader answers are estimates."
     else:
-        note = ("No plan detector is installed on this server (ultralytics + weights in third_party/weights/), so counts come "
-                "from a vision model as estimates, or are refused.")
+        note = "Live YOLO detection is unavailable. Image-reader answers are estimates."
     return {**d.summary(), "ask_path": d.ask_path, "files": d.files, "upload": True,
             "sheets": [{"kind": "image", "path": s.path, "page": 0, "label": s.label, "src": f"/api/file?path={_q(s.path)}",
                         "width": w, "height": h}],

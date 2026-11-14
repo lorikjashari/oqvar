@@ -23,6 +23,7 @@ Return JSON: {{"answer": <number or short text, or null if the drawing does not 
  "items": [{{"label": <what it is>, "box_2d": [ymin, xmin, ymax, xmax]}}],
  "note": <one short sentence: what you looked at>}}
 - For counting questions list EVERY counted item in "items" with a tight box, coordinates normalised to 0-1000.
+- When asked to highlight, mark or locate objects, list the requested objects with one tight box each and describe what was located in "answer".
 - For other questions put the region(s) you read the answer from in "items" (at most 5)."""
 
 
@@ -32,7 +33,7 @@ def ask(image: Path, question: str, size: tuple[int, int], cache_key: str | None
         import hashlib
 
         CACHE.mkdir(parents=True, exist_ok=True)
-        cached = CACHE / (hashlib.sha1(f"{cache_key}|{question}".encode()).hexdigest()[:20] + ".json")
+        cached = CACHE / (hashlib.sha1(f"{cache_key}|{question}|{PROMPT}".encode()).hexdigest()[:20] + ".json")
         if cached.exists():
             d = json.loads(cached.read_text())
             return _to_answer(d, size), None
@@ -50,9 +51,11 @@ def _to_answer(d: dict, size: tuple[int, int]) -> Answer:
     ev = []
     for i, it in enumerate(d.get("items") or []):
         b = it.get("box_2d") if isinstance(it, dict) else None
-        if not (isinstance(b, list) and len(b) == 4 and all(isinstance(v, (int, float)) for v in b)):
+        if not (isinstance(b, list) and len(b) == 4 and all(type(v) in (int, float) and 0 <= v <= 1000 for v in b)):
             continue
         y0, x0, y1, x1 = b
+        if not (x0 < x1 and y0 < y1):
+            continue
         ev.append(Evidence("box", f"vision-{i}", str(it.get("label") or f"item {i + 1}"), None,
                            [[round(x0 / 1000 * w, 1), round(y0 / 1000 * h, 1)], [round(x1 / 1000 * w, 1), round(y1 / 1000 * h, 1)]]))
     value = d.get("answer")
@@ -62,3 +65,27 @@ def _to_answer(d: dict, size: tuple[int, int]) -> Answer:
     return Answer(value, d.get("unit") if d.get("unit") in ("count", "m2", "m", "m3") else None, "vision",
                   0.4 if value is not None else 0.0,
                   "AI vision estimate (Gemma 4 read the sheet; no geometry to compute from)" + (f" · {note}" if note else ""), ev)
+
+
+def require_marks(a: Answer, *, count: bool) -> Answer:
+    """Check that a result can be shown on the sheet before returning it."""
+    if a.value is None:
+        return a
+    from .cubicasa_rules import _iou
+
+    marks, boxes = [], []
+    for e in a.evidence:
+        if e.kind != "box" or not e.coords or len(e.coords) != 2:
+            continue
+        box = e.coords[0] + e.coords[1]
+        if all(_iou(box, other) < 0.85 for other in boxes):
+            marks.append(e)
+            boxes.append(box)
+    if count and marks and type(a.value) in (int, float) and a.value == len(marks):
+        a.value, a.unit, a.evidence = len(marks), "count", marks
+        return a
+    if not count and marks:
+        a.evidence = marks
+        return a
+    return Answer(None, None, "unverified_marks", 0.0,
+                  "The image reader could not locate enough distinct items to support its answer on the drawing.")
