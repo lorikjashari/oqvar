@@ -40,6 +40,18 @@ app.add_middleware(GZipMiddleware, minimum_size=2000)
 
 
 @app.middleware("http")
+async def fresh_app_code(request, call_next):
+    """The app's own pages, scripts and styles are revalidated on every load (a 304 when unchanged): without this,
+    browsers guess a cache lifetime and keep running an old viewer script against a new page after an update."""
+    response = await call_next(request)
+    path = request.url.path
+    if (path.startswith(("/web/", "/blueprint3d/viewer/")) and path.endswith((".js", ".html", ".css", "/"))) \
+            or path in ("/", "/app"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
+@app.middleware("http")
 async def revalidate_pages(request, call_next):
     """Pages and their scripts revalidate on every load (ETag makes it cheap), so an edit never mixes old and new files."""
     response = await call_next(request)

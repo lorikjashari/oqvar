@@ -45,10 +45,12 @@
   svg .room.hl { fill: #ffb02055 !important; }
   body.embed { --bg: #e7e2d5; --panel: #fbfaf6; --line: #15171b; --text: #15171b; --muted: #4b5059; --accent: #cf2a1e; --warn: #4b5059; }
   body.embed header, body.embed footer, body.embed main > section:first-child { display: none; }
-  body.embed main { grid-template-columns: 1fr; height: 100%; min-height: 0; }
+  /* embedded in the app: the 3D pane alone fills the whole panel (one row, at any width; the narrow-screen rule
+     below would otherwise keep an empty row for the hidden 2D pane) */
+  body.embed main { grid-template-columns: 1fr; grid-template-rows: 1fr; height: 100%; min-height: 0; }
   body.embed .pane { border-right: 0; }
   body.embed button { border-radius: 0; font: 500 10.5px ui-monospace, Menlo, monospace; letter-spacing: .08em; text-transform: uppercase; }
-  body.embed .assume { background: #fbfaf6; border: 1px solid #15171b; border-radius: 0; }
+  body.embed .assume { background: #fbfaf6; border: 1px solid #15171b; border-radius: 0; top: 38px; bottom: auto; }  /* the host's stepper sits at the bottom */
   @media (max-width: 800px) { main { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; height: 900px; } footer { grid-template-columns: 1fr; height: auto; } }
 </style>
 <script type="importmap">
@@ -73,7 +75,7 @@
     <div id="orig"><img alt="Original drawing"></div>
   </section>
   <section class="pane">
-    <div class="pane-title">3D <button id="xray">X-ray</button><button id="isolate" class="ifc-only" title="Show only the selected storey">Isolate storey</button><button id="topview">Top</button><button id="reset">Reset</button></div>
+    <div class="pane-title">3D <button id="xray">X-ray</button><button id="isolate" class="ifc-only" title="Show only the selected storey">Isolate storey</button><button id="eyelevel" title="Stand in the building at eye height (1.6 m); stepping through evidence then walks to each item">Eye level</button><button id="topview">Top</button><button id="reset">Reset</button></div>
     <canvas id="three"></canvas>
     <div class="assume" id="assume"></div>
   </section>

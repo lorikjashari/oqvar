@@ -59,7 +59,7 @@ def counted(boxes: list, cfg: dict) -> dict[int, str]:
     return out
 
 
-VERSION = "fp3"  # bump when stoa_qa.floorplan changes what it reconstructs
+VERSION = "fp17"  # bump when stoa_qa.floorplan changes what it reconstructs
 PLANS = REPO / "eval_out" / "plan3d"
 
 
@@ -106,17 +106,26 @@ def _scale_plan(plan) -> tuple[float, str]:
     return 50.0, "default 50 px/m"
 
 
-def _leaf(rect: list, horizontal: bool, side: int, t: float) -> list:
-    """An open door leaf (px): hinged at one end of the opening, standing across it on the swing side."""
-    xs, ys = [p[0] for p in rect], [p[1] for p in rect]
-    x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
-    if horizontal:
-        w, yc = x1 - x0, (y0 + y1) / 2
-        ya, yb = sorted((yc, yc + side * w))
-        return _rect(x0, ya, x0 + t, yb)
-    h, xc = y1 - y0, (x0 + x1) / 2
-    xa, xb = sorted((xc, xc + side * h))
-    return _rect(xa, y0, xb, y0 + t)
+def _frame(rect: list) -> tuple[np.ndarray, np.ndarray, np.ndarray, float]:
+    """An opening's (start point on the wall centreline, unit axis along the wall, unit normal, width): the long side
+    of the cut is the wall direction, at whatever angle the wall runs."""
+    r = np.asarray(rect, np.float64)
+    e1, e2 = r[1] - r[0], r[3] - r[0]
+    if np.hypot(*e2) > np.hypot(*e1):  # the cut's long side runs along the wall
+        start, axis, across = (r[0] + r[1]) / 2, e2, e1
+    else:
+        start, axis, across = (r[0] + r[3]) / 2, e1, e2
+    w = float(np.hypot(*axis))
+    return start, axis / max(w, 1e-9), across / max(float(np.hypot(*across)), 1e-9), w
+
+
+def _leaf(rect: list, side_point: list | None, t: float) -> list:
+    """An open door leaf (px): hinged at the start of the opening, standing across the wall, on the side of
+    side_point (the detector box centre, which holds the drawn swing arc)."""
+    start, axis, nrm, w = _frame(rect)
+    if side_point is not None and float((np.asarray(side_point) - np.mean(rect, axis=0)) @ nrm) < 0:
+        nrm = -nrm
+    return [list(start), list(start + axis * t), list(start + axis * t + nrm * w), list(start + nrm * w)]
 
 
 def build(image: Path, rel: str, boxes: list | None, cfg: dict, plan=None, openings: list | None = None) -> dict:
@@ -152,12 +161,11 @@ def build(image: Path, rel: str, boxes: list | None, cfg: dict, plan=None, openi
             continue
         oid = box_id(op.index) if op.index is not None else f"{op.kind}:{i}"
         if op.kind == "door":
-            side = 1
+            swing = None
             if op.index is not None and boxes:  # the detector box holds the swing arc: the leaf opens to that side
                 b = boxes[op.index]
-                c = np.mean(op.rect, axis=0)
-                side = 1 if ((b[3] + b[5]) / 2 >= c[1] if op.horizontal else (b[2] + b[4]) / 2 >= c[0]) else -1
-            doors.append({"id": oid, "layer": "PLAN_DOOR", "leaf": P(_leaf(op.rect, op.horizontal, side, leaf_t)),
+                swing = [(b[2] + b[4]) / 2, (b[3] + b[5]) / 2]
+            doors.append({"id": oid, "layer": "PLAN_DOOR", "leaf": P(_leaf(op.rect, swing, leaf_t)),
                           "lintel": P(op.rect), "width_m": round(op.width / ppm, 2)})
         else:
             windows.append({"id": oid, "layer": "PLAN_WINDOW", "poly": P(op.rect)})
@@ -181,12 +189,23 @@ def build(image: Path, rel: str, boxes: list | None, cfg: dict, plan=None, openi
                     claimed.add(best)
                     rooms[best].update(id=box_id(k), layer="YOLO_ROOM", label=label, kind=kind, outdoor=kind == "outdoor",
                                        score=boxes[k][1])
-                else:  # e.g. an open kitchen inside a traced living room: cut it out, so the floors never overlap
-                    for i in (i for i, r in enumerate(rooms) if r.get("_net")):
-                        if rooms[i]["_geom"].intersects(b):
-                            rooms[i]["_geom"] = rooms[i]["_geom"].difference(b)
+                else:
+                    # the detector's box is axis-aligned and only roughly the room: the room is the part of the traced
+                    # room it lies in, so it follows the real walls and never pokes out of the building
+                    host = max(free, key=lambda i: rooms[i]["_geom"].intersection(b).area, default=None)
+                    part = rooms[host]["_geom"].intersection(b) if host is not None else None
+                    if part is None or part.is_empty:
+                        continue
+                    if part.area >= 0.85 * rooms[host]["_geom"].area or part.area < 0.3 * b.area:
+                        # most of the traced room, or too little of the box inside it: the traced room is this room
+                        claimed.add(host)
+                        rooms[host].update(id=box_id(k), layer="YOLO_ROOM", label=label, kind=kind,
+                                           outdoor=kind == "outdoor", score=boxes[k][1])
+                        continue
+                    # e.g. an open kitchen inside a traced living room: cut out of it, so the floors never overlap
+                    rooms[host]["_geom"] = rooms[host]["_geom"].difference(part)
                     rooms.append({"id": box_id(k), "layer": "YOLO_ROOM", "number": "", "label": label, "kind": kind,
-                                  "outdoor": kind == "outdoor", "printed_area": None, "unit": None, "_geom": b,
+                                  "outdoor": kind == "outdoor", "printed_area": None, "unit": None, "_geom": part,
                                   "score": boxes[k][1]})
     kept = []
     for r in rooms:
@@ -203,7 +222,9 @@ def build(image: Path, rel: str, boxes: list | None, cfg: dict, plan=None, openi
     rooms = kept
     for n, r in enumerate(rooms, 1):
         r["number"] = str(n)
-    pts = [q for g in (walls, rooms) for el in g for q in el["poly"]] or [[0, 0], [1, 1]]
+    slabs = [{"id": f"slab:{i}", "layer": "PLAN_SLAB", "poly": P(o), "holes": [P(hh) for hh in hs]}
+             for i, (o, hs) in enumerate(getattr(plan, "slabs", []) or [])]
+    pts = [q for g in (walls, rooms, slabs) for el in g for q in el["poly"]] or [[0, 0], [1, 1]]
     xs, ys = [q[0] for q in pts], [q[1] for q in pts]
     how = ("walls and rooms traced from the CubiCasa5K network's wall map; doors and windows set into those walls and "
            "fixtures and room types placed from the YOLO detector boxes the answers count" if boxes
@@ -217,6 +238,7 @@ def build(image: Path, rel: str, boxes: list | None, cfg: dict, plan=None, openi
         "counts": {"rooms": len(rooms), "walls": len(walls), "doors": len(doors), "windows": len(windows), "units": 0,
                    "fixtures": len(fixtures)},
         "units": [], "rooms": rooms, "walls": walls, "doors": doors, "windows": windows, "fixtures": fixtures,
+        "slabs": slabs,
     }
 
 

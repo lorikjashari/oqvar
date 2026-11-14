@@ -236,11 +236,17 @@ function setView(v) {
   document.querySelectorAll("#view-seg button").forEach((b) => { b.classList.toggle("on", b.dataset.view === v); b.setAttribute("aria-pressed", b.dataset.view === v); });
   $("#three").classList.toggle("hidden", v !== "3d"); $("#canvas").classList.toggle("hidden", v === "3d");
   document.querySelector(".zoom").classList.toggle("hidden", v === "3d");
-  if (v === "3d") open3D(); else { setMsg(""); updateStepper(); }
+  state.focus = 0;
+  if (v === "3d") open3D();
+  else {  // back on the sheet: draw the active answer's marks again (the 3D view does not), so its takeoff tiles work
+    setMsg("");
+    if (state.active?.res && state.sheet) drawOverlay();
+    updateStepper();
+  }
 }
 
 async function open3D() {
-  $("#stepper").classList.add("hidden");
+  state.focus = 0; updateStepper();
   if (!state.sceneUrl) {
     const from = { ifc: "the IFC model", dxf: "the CAD geometry", mesh: "the 3D mesh", raster: "the scan (approximate)" };
     setMsg(state.drawing.upload ? "Tracing walls, rooms, doors and windows from your plan (up to half a minute the first time)"
@@ -255,7 +261,7 @@ async function open3D() {
 }
 
 function highlight3D(ids) {
-  state.pending3d = ids;
+  state.pending3d = ids; state.focus = 0; updateStepper();
   $("#three").contentWindow?.postMessage({ type: "oqvar:highlight", ids }, location.origin);
 }
 window.addEventListener("message", (e) => {
@@ -396,18 +402,43 @@ function applyFocus(zoom = true) {
   if (zoom) { const it = state.items[f - 1]; if (it) stage.zoomTo(it.bbox); else stage.fit(); }
 }
 
+// In the 3D view the same stepper flies the camera to each marked item (blueprint3d/viewer: oqvar:focus)
+const items3d = () => (state.active?.res?.overlay?.items || []).filter((it) => it.id != null);
+const stepItems = () => (state.view === "3d" ? items3d() : state.items);
+
+function focus3D() {
+  const it = items3d()[state.focus - 1];
+  $("#three").contentWindow?.postMessage({ type: "oqvar:focus", id: it ? it.id : null }, location.origin);
+  document.querySelectorAll(".rec.on [data-n]").forEach((el) => {
+    const on = !!it && +el.dataset.n === it.n;
+    el.classList.toggle("focus", on);
+    if (on) el.scrollIntoView({ block: "nearest", inline: "nearest" });
+  });
+}
+
 function focusItem(i) {
+  if (state.view === "3d") {
+    const n = items3d().length; if (!n) return;
+    state.focus = i < 1 ? n : i > n ? 1 : i;
+    focus3D(); updateStepper(); return;
+  }
   if (state.view !== "sheet") setView("sheet");
   const n = state.items.length; if (!n) return;
   state.focus = i < 1 ? n : i > n ? 1 : i;
   applyFocus(); updateStepper();
 }
 
+function showAll() {
+  state.focus = 0;
+  if (state.view === "3d") focus3D(); else applyFocus();
+  updateStepper();
+}
+
 function updateStepper() {
-  const n = state.items.length, st = $("#stepper");
-  st.classList.toggle("hidden", !n || state.view !== "sheet");
+  const items = stepItems(), n = items.length, st = $("#stepper");
+  st.classList.toggle("hidden", !n || (state.view !== "sheet" && state.view !== "3d"));
   if (!n) return;
-  const it = state.items[state.focus - 1];
+  const it = items[state.focus - 1];
   $("#st-label").innerHTML = it ? `<b>${pad2(state.focus)}</b> / ${pad2(n)} — ${esc(it.label || "item")}${it.value != null ? ` · ${esc(it.value)}` : ""}`
     : `<b>${n}</b> item${n > 1 ? "s" : ""} marked — step through to check each`;
 }
@@ -581,6 +612,11 @@ function takeoffEl(card, on) {
   const go = (n) => (ev) => {
     ev.stopPropagation();
     const jump = async () => {
+      if (state.view === "3d") {           // the 3D view: the camera flies to the item
+        const k = items3d().findIndex((x) => x.n === n);
+        if (k >= 0) { focusItem(k + 1); return; }
+        setView("sheet");                  // an item with no 3D element: show it on the sheet instead
+      }
       let i = state.items.findIndex((x) => x.n === n);
       if (i < 0) {  // not on the sheet in view: open the sheet that holds it, then focus it there
         const j = sheetOf(r, n);
@@ -609,7 +645,7 @@ function takeoffEl(card, on) {
       const [x0, y0, x1, y1] = it.bbox, side = Math.min(Math.max(x1 - x0, y1 - y0) * 1.9 + 30, sh.width, sh.height);
       const sx = Math.min(Math.max((x0 + x1) / 2 - side / 2, 0), sh.width - side), sy = Math.min(Math.max((y0 + y1) / 2 - side / 2, 0), sh.height - side);
       const pc = (v) => `${(v / side) * 100}%`;
-      return h("button", { class: "th", "data-n": it.n, title: `${it.label || ""}${it.value != null ? ` · ${it.value}` : ""}`, onclick: go(it.n),
+      return h("button", { class: "th", "data-n": it.n, title: `${it.label || ""}${it.value != null ? ` · ${it.value}` : ""} · click to go there`, onclick: go(it.n),
         style: { backgroundImage: `url("${sh.src}")`, backgroundSize: `${(sh.width / side) * 100}% ${(sh.height / side) * 100}%`,
           backgroundPosition: `${sh.width > side ? (sx / (sh.width - side)) * 100 : 0}% ${sh.height > side ? (sy / (sh.height - side)) * 100 : 0}%` } },
         h("u", { style: { left: pc(x0 - sx), top: pc(y0 - sy), width: pc(x1 - x0), height: pc(y1 - y0) } }), h("span", { class: "tag" }, it.n));
@@ -897,7 +933,7 @@ function init() {
   $("#btn-split").addEventListener("click", () => (state.split ? closeSplit() : openSplit()));
   initSplit();
   $("#st-prev").onclick = () => focusItem(state.focus - 1); $("#st-next").onclick = () => focusItem(state.focus + 1);
-  $("#st-all").onclick = () => { state.focus = 0; applyFocus(); updateStepper(); };
+  $("#st-all").onclick = showAll;
   $("#open-bench").onclick = openReport; $("#close-bench").onclick = () => $("#bench").close();
   $("#bench").addEventListener("click", (e) => { if (e.target.id === "bench") $("#bench").close(); });
   window.addEventListener("keydown", (e) => {
@@ -906,7 +942,7 @@ function init() {
     if (e.key === "/") { e.preventDefault(); $("#q").focus(); }
     else if (e.key === "ArrowRight") focusItem(state.focus + 1);
     else if (e.key === "ArrowLeft") focusItem(state.focus - 1);
-    else if (e.key === "Escape") { state.focus = 0; applyFocus(); updateStepper(); }
+    else if (e.key === "Escape") showAll();
   });
   const fromHash = () => (location.hash.length > 1 ? decodeURIComponent(location.hash.slice(1)) : null);
   window.addEventListener("hashchange", () => { const id = fromHash(); if (id && id !== state.drawing?.id) openDrawing(id); });

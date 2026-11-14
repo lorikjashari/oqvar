@@ -14,10 +14,13 @@ const KIND_COLORS = {
 };
 const EMBED = new URLSearchParams(location.search).has("embed");  // shown inside the OQVAR app: paper theme, 3D pane only
 const HL = new THREE.Color(EMBED ? 0xffd21a : 0xffb020);
+const FOCUS = new THREE.Color(0xff6a00);  // the one item the camera is visiting
+const EYE = 1.6;                          // eye height (m) for the ground-level view
 const $ = (s) => document.querySelector(s);
 const hex = (c) => "#" + c.toString(16).padStart(6, "0");
 
 let scene3, camera, renderer, controls, root, S = null, loadToken = 0;
+let flight = null, focusId = null, eyeLevel = false;
 const byId = new Map();      // id -> { el, group, meshes: [], svg: [] }
 let highlighted = new Set();
 let xray = false, isolate = false, storey = null;
@@ -29,9 +32,17 @@ if (EMBED) document.body.classList.add("embed");
 const sceneId = (i) => (byId.has(i) ? i : byId.has("#" + i) ? "#" + i : null);
 const notifyHost = () => { if (window.parent !== window) window.parent.postMessage({ type: "oqvar:ready", name: $("#scene").value }, location.origin); };
 window.addEventListener("message", (e) => {
-  if (e.origin !== location.origin || e.data?.type !== "oqvar:highlight") return;
-  const ids = (e.data.ids || []).map(sceneId).filter((i) => i != null);
-  select(ids, ids.length ? `<b style="color:var(--text)">Evidence:</b> ${ids.length} element(s) highlighted.` : "");
+  if (e.origin !== location.origin || !S) return;
+  const d = e.data || {};
+  if (d.type === "oqvar:highlight") {
+    const ids = (d.ids || []).map(sceneId).filter((i) => i != null);
+    select(ids, ids.length ? `<b style="color:var(--text)">Evidence:</b> ${ids.length} element(s) highlighted.` : "");
+    focusOn(null);                                  // show them all first; the host's stepper then visits each
+  } else if (d.type === "oqvar:focus") {
+    focusOn(d.id != null ? sceneId(d.id) : null);
+  } else if (d.type === "oqvar:eye") {
+    setEyeLevel(!!d.on);
+  }
 });
 
 async function boot() {
@@ -58,8 +69,8 @@ async function load(name) {
   document.body.classList.toggle("ifc", ifc);
   if (ifc) return loadIFC(token);
   if (S.source.format === "mesh") return loadMesh(token);
-  for (const g of ["rooms", "walls", "doors", "windows", "units", "fixtures"])
-    for (const el of S[g]) byId.set(el.id, { el, group: g, meshes: [], svg: [] });
+  for (const g of ["slabs", "rooms", "walls", "doors", "windows", "units", "fixtures"])
+    for (const el of S[g] ?? []) byId.set(el.id, { el, group: g, meshes: [], svg: [] });
   build2D(); build3D();
   const a = S.assumptions;
   const raster = S.source.format === "raster";
@@ -91,6 +102,8 @@ function build2D() {
   const pts = (p) => p.map(([x, y]) => `${x},${-y}`).join(" ");
   const path = (p, holes = []) => [p, ...holes].map((r) => "M" + r.map(([x, y]) => `${x},${-y}`).join("L") + "Z").join("");
   const add = (tag, attrs, id) => svgAdd(svg, tag, attrs, id);
+  // the building's floor slab (raster plans): one continuous floor under the rooms
+  for (const s of S.slabs ?? []) add("path", { d: path(s.poly, s.holes ?? []), "fill-rule": "evenodd", fill: "#e4e1d8", stroke: "none" }, s.id);
   for (const r of S.rooms)
     add("path", { d: path(r.poly, r.holes), class: "room", "fill-rule": "evenodd", fill: hex(KIND_COLORS[r.kind]) + "66", stroke: "#999", "stroke-width": .02 }, r.id);
   for (const f of S.fixtures) add("polygon", { points: pts(f.poly), fill: f.label ? "#ffffffcc" : "none", stroke: "#888", "stroke-width": .015 }, f.id);
@@ -145,6 +158,7 @@ function init3D() {
   const resize = () => {
     const r = canvas.parentElement.getBoundingClientRect();
     renderer.setSize(r.width, r.height, false); camera.aspect = r.width / r.height; camera.updateProjectionMatrix();
+    if (root && !focusId && !flight && root.children.length) (highlighted.size ? focusOn(null) : frame());
   };
   new ResizeObserver(resize).observe(canvas.parentElement); resize();
   const ray = new THREE.Raycaster(), ptr = new THREE.Vector2();
@@ -165,7 +179,8 @@ function init3D() {
   });
   canvas.addEventListener("mousemove", (e) => tip(e, pick(e)));
   canvas.addEventListener("mouseleave", () => tip(null));
-  (function loop() { controls.update(); renderer.render(scene3, camera); requestAnimationFrame(loop); })();
+  controls.addEventListener("start", () => { flight = null; });   // the user takes over: stop flying
+  (function loop() { if (flight) flight(performance.now()); controls.update(); renderer.render(scene3, camera); requestAnimationFrame(loop); })();
 }
 
 function newRoot() {
@@ -208,6 +223,7 @@ function build3D() {
   const A = S.assumptions, H = A.storey_height;
   const mat = (c, o = {}) => new THREE.MeshStandardMaterial({ color: c, roughness: .85, ...o });
   const wallMat = mat(0xe9ebee);
+  for (const s of S.slabs ?? []) register(prism(s.poly, -0.12, 0.0, mat(0xd8d4c8), s.holes ?? []), s.id, "slabs");
   for (const r of S.rooms) register(prism(r.poly, 0, 0.04, mat(KIND_COLORS[r.kind] ?? KIND_COLORS.other), r.holes), r.id, "rooms");
   for (const w of S.walls) register(prism(w.poly, 0, H, wallMat, w.holes ?? []), w.id, "walls", true);
   for (const w of S.windows) {
@@ -238,14 +254,38 @@ function robustBox(boxes) {
   return out;
 }
 
+// How far the camera must stand so a box fits the view, for the canvas's actual shape (wide or tall panel)
+function fitDistance(box, margin = 1.12) {
+  const r = box.getSize(new THREE.Vector3()).length() / 2;
+  const vfov = THREE.MathUtils.degToRad(camera.fov) / 2, hfov = Math.atan(Math.tan(vfov) * camera.aspect);
+  return (r / Math.sin(Math.min(vfov, hfov))) * margin;
+}
+
+// Where the camera stands, looking at `target` from direction `dir`, so the box fills `fill` of the view: its corners
+// are projected and the distance scaled until the widest one reaches the edge (exact for any panel shape)
+function fitPos(box, target, dir, fill = .88) {
+  const keep = camera.position.clone(), keepQ = camera.quaternion.clone();
+  const corners = [];
+  for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y]) for (const z of [box.min.z, box.max.z]) corners.push(new THREE.Vector3(x, y, z));
+  let d = fitDistance(box, 1.0);
+  for (let i = 0; i < 4; i++) {
+    camera.position.copy(target).addScaledVector(dir, d); camera.lookAt(target); camera.updateMatrixWorld();
+    let m = 0;
+    for (const c of corners) { const v = c.clone().project(camera); if (v.z < 1) m = Math.max(m, Math.abs(v.x), Math.abs(v.y)); }
+    if (!m) break;
+    d *= m / fill;
+  }
+  camera.position.copy(keep); camera.quaternion.copy(keepQ);
+  return target.clone().addScaledVector(dir, d);
+}
+
 function frame(top = false) {
   const box = robustBox(root.children.filter((m) => m.visible).map((m) => new THREE.Box3().setFromObject(m)));
   if (box.isEmpty()) return;
   const c = box.getCenter(new THREE.Vector3()), size = box.getSize(new THREE.Vector3());
   const span = Math.max(size.x, size.z, size.y * 1.5);
   controls.target.copy(c);
-  if (top) camera.position.set(c.x, c.y + span * 1.25, c.z + .01);
-  else camera.position.set(c.x + span * .55, c.y + span * .6, c.z + span * .75);
+  camera.position.copy(fitPos(box, c, top ? new THREE.Vector3(0, 1, .0001).normalize() : new THREE.Vector3(.55, .6, .75).normalize()));
   camera.near = span / 1000; camera.far = span * 20; camera.updateProjectionMatrix();
   controls.update();
 }
@@ -437,8 +477,96 @@ function build2DFromIFC() {
   for (const id of highlighted) paint(id, true);
 }
 
+// ------------------------------------------------------------------ fly-to camera: visit each piece of evidence
+// Plan (x, y) is world (x, ., -y). Doors and windows are seen square-on along their wall's normal, from inside the
+// building; rooms from inside, looking across; anything else from the side facing away from the building's middle.
+const ease = (k) => (k < .5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2);
+
+function flyTo(pos, target, ms = 950) {
+  const p0 = camera.position.clone(), t0 = controls.target.clone(), start = performance.now();
+  const near = Math.max(0.02, Math.min(camera.near, pos.distanceTo(target) / 200));
+  camera.near = near; camera.updateProjectionMatrix();
+  flight = (now) => {
+    const k = ease(Math.min(1, (now - start) / ms));
+    camera.position.lerpVectors(p0, pos, k); controls.target.lerpVectors(t0, target, k);
+    if (k >= 1) flight = null;
+  };
+}
+
+function boxOfIds(ids) {
+  const b = new THREE.Box3();
+  for (const id of ids) for (const m of byId.get(id)?.meshes ?? []) if (m.visible) b.union(new THREE.Box3().setFromObject(m));
+  return b;
+}
+
+function buildingCentre() {
+  const b = robustBox(root.children.filter((m) => m.visible).map((m) => new THREE.Box3().setFromObject(m)));
+  return b.isEmpty() ? new THREE.Vector3() : b.getCenter(new THREE.Vector3());
+}
+
+function wallNormal(el) {  // unit normal of the wall a door / window sits in (world xz), or null
+  const r = el.lintel ?? el.poly;
+  if (!r || r.length < 4) return null;
+  const e1 = [r[1][0] - r[0][0], r[1][1] - r[0][1]], e2 = [r[3][0] - r[0][0], r[3][1] - r[0][1]];
+  const along = Math.hypot(...e1) >= Math.hypot(...e2) ? e1 : e2;   // the opening's long side runs along the wall
+  return new THREE.Vector3(-along[1], 0, -along[0]).normalize();
+}
+
+function focusOn(id) {
+  const prev = focusId;
+  focusId = id && byId.has(id) ? id : null;
+  if (prev) paint(prev, highlighted.has(prev));
+  if (focusId) paint(focusId, true);
+  const ids = focusId ? [focusId] : [...highlighted];
+  if (!ids.length) { if (!focusId) frame(); return; }
+  // the overview of several marks shows the whole building, so each mark is seen where it sits
+  const box = !focusId && ids.length >= 3
+    ? robustBox(root.children.filter((m) => m.visible).map((m) => new THREE.Box3().setFromObject(m))) : boxOfIds(ids);
+  if (box.isEmpty()) return;
+  const c = box.getCenter(new THREE.Vector3()), size = box.getSize(new THREE.Vector3());
+  const span = Math.max(size.x, size.z, 0.6);
+  const mid = buildingCentre(), inward = new THREE.Vector3(mid.x - c.x, 0, mid.z - c.z);
+  const rec = focusId ? byId.get(focusId) : null;
+  let n = rec && (rec.group === "doors" || rec.group === "windows") ? wallNormal(rec.el) : null;
+  if (n) { if (inward.lengthSq() > 1e-6 && n.dot(inward) < 0) n.negate(); }   // stand inside, facing the wall
+  else { n = inward.lengthSq() > 1e-6 ? inward.clone().negate().normalize() : new THREE.Vector3(.6, 0, .8); }
+  let pos, target;
+  if (!focusId) {                       // all highlighted: an overview that frames them, whatever the panel's shape
+    target = c.clone(); target.y = 0.5;
+    pos = fitPos(box, target, new THREE.Vector3(n.x * .55, 1.05, n.z * .55).normalize());
+  } else if (eyeLevel) {                // standing in the building, eyes at 1.6 m
+    if (rec.group === "rooms") {        // inside the room, near its edge, looking across it
+      const back = n.clone().multiplyScalar(-1);
+      pos = new THREE.Vector3(c.x + back.x * span * .38, EYE, c.z + back.z * span * .38);
+      target = new THREE.Vector3(c.x - back.x * span * .2, 1.0, c.z - back.z * span * .2);
+    } else {
+      const d = Math.max(2.2, span * 1.9);
+      pos = new THREE.Vector3(c.x + n.x * d, EYE, c.z + n.z * d);
+      target = new THREE.Vector3(c.x, Math.min(Math.max(c.y, 0.9), 1.5), c.z);
+    }
+  } else {                              // from above at an angle, close enough to read the item
+    const d = Math.max(5.5, span * 3);   // close, but with the item's wall and room in view
+    target = c.clone();
+    pos = new THREE.Vector3(c.x + n.x * d * .7, c.y + d * .85, c.z + n.z * d * .7);
+  }
+  flyTo(pos, target);
+  if (focusId) $("#info").innerHTML = describe(focusId);
+}
+
+function setEyeLevel(on) {
+  eyeLevel = on;
+  $("#eyelevel")?.classList.toggle("on", on);
+  if (focusId) focusOn(focusId);
+  else if (on) {                        // stand at the building's edge, looking in
+    const mid = buildingCentre(), box = robustBox(root.children.filter((m) => m.visible).map((m) => new THREE.Box3().setFromObject(m)));
+    const size = box.getSize(new THREE.Vector3());
+    flyTo(new THREE.Vector3(mid.x + size.x * .35, EYE, mid.z + size.z * .35), new THREE.Vector3(mid.x, 1.2, mid.z));
+  } else frame();
+}
+
 // ------------------------------------------------------------------ selection / evidence
 function select(ids, html) {
+  focusId = null;
   for (const id of highlighted) paint(id, false);
   highlighted = new Set(ids);
   for (const id of highlighted) paint(id, true);
@@ -452,11 +580,12 @@ function select(ids, html) {
 
 function paint(id, on) {
   const rec = byId.get(id); if (!rec) return;
+  const focus = on && id === focusId;
   for (const e of rec.svg) e.classList.toggle("hl", on);
   for (const m of rec.meshes) {
     ownMaterial(m);
-    m.material.color.copy(on ? HL : m.userData.baseColor);
-    m.material.emissive = new THREE.Color(on ? 0x553300 : 0x000000);
+    m.material.color.copy(focus ? FOCUS : on ? HL : m.userData.baseColor);
+    m.material.emissive = new THREE.Color(focus ? 0x7a2a00 : on ? 0x553300 : 0x000000);
     if (rec.group === "rooms" && S.source.format === "ifc") { m.material.opacity = on ? .65 : (m.userData.baseOpacity ?? .22); m.material.needsUpdate = true; }
   }
 }
@@ -629,8 +758,15 @@ $("#ask").onsubmit = async (e) => {
 // ------------------------------------------------------------------ toolbar
 $("#xray").onclick = (e) => { xray = !xray; e.target.classList.toggle("on", xray); applyXray(); };
 $("#isolate").onclick = (e) => { isolate = !isolate; e.target.classList.toggle("on", isolate); applyStorey(); frame(); };
-$("#topview").onclick = () => frame(true);
-$("#reset").onclick = () => frame(false);
+$("#topview").onclick = () => { if (eyeLevel) setEyeLevel(false); frame(true); };
+if (!$("#eyelevel")) {  // a cached index.html from before the button existed: add it next to "Top"
+  const b = document.createElement("button");
+  b.id = "eyelevel"; b.textContent = "Eye level";
+  b.title = "Stand in the building at eye height (1.6 m); stepping through evidence then walks to each item";
+  $("#topview").before(b);
+}
+$("#eyelevel").onclick = () => setEyeLevel(!eyeLevel);
+$("#reset").onclick = () => { flight = null; focusId = null; if (eyeLevel) setEyeLevel(false); else frame(false); };
 const tab = (orig) => { $("#orig").style.display = orig ? "flex" : "none"; $("#tab-orig").classList.toggle("on", orig); $("#tab-vec").classList.toggle("on", !orig); };
 $("#tab-vec").onclick = () => tab(false);
 $("#tab-orig").onclick = () => tab(true);

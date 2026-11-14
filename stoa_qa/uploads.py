@@ -33,6 +33,20 @@ class BadUpload(ValueError):
     pass
 
 
+def _dark_on_light(img):
+    """A drawing with light lines on a dark ground (a blueprint, an inverted scan) is stored as dark lines on white,
+    in grey: the detectors, the CubiCasa5K network and the OCR all learned from dark-on-light drawings."""
+    from PIL import ImageOps
+
+    g = img.convert("L")
+    small = g.copy()
+    small.thumbnail((256, 256))
+    px = sorted(small.getdata())
+    if px[len(px) // 2] >= 110:  # median brightness: a normal drawing on light paper
+        return img
+    return ImageOps.invert(g).convert("RGB")
+
+
 def root() -> Path:
     return Path(os.environ.get("STOA_UPLOADS") or REPO / "eval_out" / "uploads")
 
@@ -71,6 +85,7 @@ def save(data: bytes) -> str:
             if max(img.size) > WORK_SIDE:
                 k = WORK_SIDE / max(img.size)
                 img = img.resize((round(img.width * k), round(img.height * k)), Image.LANCZOS)
+            img = _dark_on_light(img)
     except BadUpload:
         raise
     except Exception:
