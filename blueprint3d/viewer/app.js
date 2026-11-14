@@ -5,6 +5,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GLTFExporter } from "three/addons/exporters/GLTFExporter.js";
+import { makeFilm } from "./film.js";
 
 const DATASET_ROOT = "../../junction-dataset/junction-dataset/"; // served from the repo root
 const WEB_IFC = "https://cdn.jsdelivr.net/npm/web-ifc@0.0.57/";
@@ -12,7 +13,7 @@ const KIND_COLORS = {
   bedroom: 0x8fb8de, living: 0xe8c48a, kitchen: 0xe59a7a, bath: 0x86d0c7, corridor: 0xcfcac0,
   storage: 0xb8aed0, outdoor: 0xa8cf8f, stair: 0xa0a4ab, other: 0xd7d3cb,
 };
-const EMBED = new URLSearchParams(location.search).has("embed");  // shown inside the OQVAR app: paper theme, 3D pane only
+const EMBED = new URLSearchParams(location.search).has("embed");  // shown inside the OQVAR app: its dark theme, 3D pane only
 const HL = new THREE.Color(EMBED ? 0xffd21a : 0xffb020);
 const FOCUS = new THREE.Color(0xff6a00);  // the one item the camera is visiting
 const EYE = 1.6;                          // eye height (m) for the ground-level view
@@ -25,6 +26,7 @@ const byId = new Map();      // id -> { el, group, meshes: [], svg: [] }
 let highlighted = new Set();
 let xray = false, isolate = false, storey = null;
 let webIfc = null;
+let filming = false, resizeView = () => {}, filmMeta = {};   // the film owns the renderer while it records
 
 // ------------------------------------------------------------------ boot (called at the end of this module)
 if (EMBED) document.body.classList.add("embed");
@@ -42,6 +44,8 @@ window.addEventListener("message", (e) => {
     focusOn(d.id != null ? sceneId(d.id) : null);
   } else if (d.type === "oqvar:eye") {
     setEyeLevel(!!d.on);
+  } else if (d.type === "oqvar:meta") {             // the host's name and licence credit for the drawing, used by the film
+    filmMeta = { title: d.title, credit: d.credit };
   }
 });
 
@@ -149,18 +153,19 @@ function init3D() {
   renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
   renderer.setPixelRatio(devicePixelRatio);
   scene3 = new THREE.Scene();
-  scene3.background = new THREE.Color(EMBED ? 0xe7e2d5 : 0x1a1f26);
+  scene3.background = new THREE.Color(EMBED ? 0x0b0c0e : 0x1a1f26);
   camera = new THREE.PerspectiveCamera(45, 1, 0.1, 5000);
   controls = new OrbitControls(camera, canvas);
   controls.enableDamping = true;
   scene3.add(new THREE.HemisphereLight(0xffffff, 0x445566, 1.6));
   const sun = new THREE.DirectionalLight(0xffffff, 1.4); sun.position.set(20, 40, 15); scene3.add(sun);
   const resize = () => {
+    if (filming) return;
     const r = canvas.parentElement.getBoundingClientRect();
     renderer.setSize(r.width, r.height, false); camera.aspect = r.width / r.height; camera.updateProjectionMatrix();
     if (root && !focusId && !flight && root.children.length) (highlighted.size ? focusOn(null) : frame());
   };
-  new ResizeObserver(resize).observe(canvas.parentElement); resize();
+  new ResizeObserver(resize).observe(canvas.parentElement); resize(); resizeView = resize;
   const ray = new THREE.Raycaster(), ptr = new THREE.Vector2();
   const pick = (e) => {
     const r = canvas.getBoundingClientRect();
@@ -180,7 +185,10 @@ function init3D() {
   canvas.addEventListener("mousemove", (e) => tip(e, pick(e)));
   canvas.addEventListener("mouseleave", () => tip(null));
   controls.addEventListener("start", () => { flight = null; });   // the user takes over: stop flying
-  (function loop() { if (flight) flight(performance.now()); controls.update(); renderer.render(scene3, camera); requestAnimationFrame(loop); })();
+  (function loop() {
+    if (!filming) { if (flight) flight(performance.now()); controls.update(); renderer.render(scene3, camera); }
+    requestAnimationFrame(loop);
+  })();
 }
 
 function newRoot() {
@@ -766,6 +774,26 @@ if (!$("#eyelevel")) {  // a cached index.html from before the button existed: a
   $("#topview").before(b);
 }
 $("#eyelevel").onclick = () => setEyeLevel(!eyeLevel);
+// a five-second film from plan to finished building (film.js), made from the model on screen
+if (!$("#film")) {  // a cached index.html from before the button existed
+  const b = document.createElement("button");
+  b.id = "film"; b.textContent = "Film";
+  $("#reset").after(b);
+}
+$("#film").title = "Make a 5-second film: the plan, the structure rising, the finished building (MP4)";
+$("#film").onclick = async () => {
+  if (filming || !root?.children.some((m) => m.visible)) return;
+  filming = true; flight = null;
+  const fmt = S.source.format, box = robustBox(root.children.filter((m) => m.visible).map((m) => new THREE.Box3().setFromObject(m)));
+  const note = fmt === "ifc" ? "Geometry and colours from the IFC model"
+    : fmt === "mesh" ? "Faces from the file · colours illustrative"
+    : `${fmt === "raster" ? "Traced from a scanned plan, approximate" : "Walls, openings and rooms from the drawing"} · heights assumed · finishes illustrative`;
+  try {
+    await makeFilm({ renderer, scene: scene3, camera, controls, root, box, drawn: fmt !== "ifc" && fmt !== "mesh", pane: $("#three").parentElement,
+      title: filmMeta.title || S.source.file.split("/").pop().replace(/\.\w+$/, "").replace(/[_-]+/g, " "), source: S.source.file, note, credit: filmMeta.credit,
+      name: $("#scene").value, after: () => { filming = false; resizeView(); controls.update(); } });
+  } finally { filming = false; }
+};
 $("#reset").onclick = () => { flight = null; focusId = null; if (eyeLevel) setEyeLevel(false); else frame(false); };
 const tab = (orig) => { $("#orig").style.display = orig ? "flex" : "none"; $("#tab-orig").classList.toggle("on", orig); $("#tab-vec").classList.toggle("on", !orig); };
 $("#tab-vec").onclick = () => tab(false);

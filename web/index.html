@@ -3,87 +3,121 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#08090b">
 <title>OQVAR — answers you can check</title>
 <link rel="icon" type="image/svg+xml" href="/web/favicon.svg">
 <link rel="stylesheet" href="/web/fonts/fonts.css">
 <link rel="stylesheet" href="/web/app.css">
 </head>
-<body>
+<body class="lib-off no-drawing">
 
 <header class="tb">
-  <a class="tb-brand" href="/" aria-label="OQVAR home">
-    <svg class="tb-mark" viewBox="467 465 1114 1117" aria-hidden="true"><path fill="var(--ink)" fill-rule="evenodd" d="M467.4 1566.3C474.4 1404.8 503.4 1252.3 557.4 1092.5C589.9 996.2 632.2 902.4 683.3 813.0C706.2 772.9 741.6 719.7 765.4 689.5C815.5 625.9 867.9 576.2 922.0 540.8C984.5 499.9 1050.8 475.4 1121.0 467.4C1138.8 465.4 1186.0 465.0 1203.0 466.8C1221.0 468.7 1243.5 472.7 1260.2 477.0C1274.4 480.6 1298.5 488.1 1305.5 491.0C1311.5 493.6 1314.6 494.9 1321.0 497.5C1340.4 505.6 1370.6 522.5 1390.5 536.5C1449.8 578.0 1496.2 632.4 1530.1 700.0C1541.6 723.0 1548.0 738.4 1555.6 761.5C1582.9 844.8 1588.2 933.1 1571.0 1020.0C1557.1 1089.9 1531.8 1157.8 1500.1 1210.3C1478.0 1246.9 1452.1 1280.1 1423.1 1309.0C1404.4 1327.6 1390.0 1339.8 1368.4 1355.3C1344.9 1372.2 1335.4 1378.1 1302.0 1396.5C1293.5 1401.1 1293.5 1401.2 1298.0 1400.6C1307.6 1399.3 1340.4 1390.6 1358.7 1384.5C1402.4 1369.9 1447.6 1346.3 1484.8 1318.6L1495.0 1311.0L1538.0 1311.0L1581.0 1311.0L1581.0 1315.2C1581.0 1320.8 1579.4 1334.9 1577.4 1347.5C1563.7 1434.2 1504.8 1513.1 1424.5 1552.5C1395.3 1566.8 1375.1 1573.1 1338.0 1579.8C1329.2 1581.3 1297.0 1581.5 897.6 1581.7L466.7 1582.0L467.4 1566.3Z M899.5 1310.0C918.3 1308.8 947.6 1305.8 961.5 1303.4C975.4 1301.1 1010.0 1293.2 1025.2 1288.9C1051.4 1281.5 1089.2 1266.6 1114.7 1253.6C1199.4 1210.5 1272.4 1143.3 1335.2 1050.5C1371.2 997.4 1406.2 929.5 1436.1 854.7C1444.0 834.9 1450.3 818.1 1462.0 785.0C1465.2 775.9 1468.2 767.7 1468.5 766.8C1469.3 764.7 1464.8 761.7 1443.4 749.9C1410.6 731.9 1392.9 724.2 1368.5 717.1C1350.8 712.0 1340.3 709.7 1322.0 706.9C1302.6 703.9 1258.5 703.6 1239.0 706.3C1157.9 717.6 1088.0 752.9 1025.7 814.0C963.9 874.4 914.8 957.0 876.1 1065.2C869.2 1084.5 868.2 1087.5 861.0 1111.0C849.6 1148.1 836.2 1204.9 828.5 1248.5C824.9 1268.5 819.1 1309.3 819.7 1310.2C820.3 1311.4 879.7 1311.1 899.5 1310.0Z"/><path fill="var(--red)" d="M1225.2 1061.8C1225.0 1036.9 1224.5 1011.8 1223.9 1006.0C1218.7 949.9 1198.3 906.2 1162.4 873.9C1152.4 865.0 1135.0 853.3 1123.8 848.0C1113.9 843.4 1094.3 836.7 1085.2 834.9C1081.8 834.2 1079.1 833.3 1079.2 832.9C1079.7 831.7 1099.0 817.0 1109.9 809.5C1151.1 781.4 1199.3 762.7 1246.5 756.5C1262.0 754.5 1293.6 754.5 1309.0 756.5C1331.8 759.5 1350.9 764.4 1372.3 772.6C1385.2 777.6 1403.9 786.7 1404.5 788.2C1404.8 788.9 1403.0 795.1 1400.6 802.0C1365.6 900.8 1318.5 991.0 1266.0 1059.4C1259.7 1067.6 1238.2 1093.3 1231.3 1100.8L1225.5 1107.1L1225.2 1061.8Z"/></svg>
-    <span><svg class="tb-wm" viewBox="0 0 4792 750" role="img" aria-label="OQVAR"><path fill="var(--ink)" d="M482 766Q349 766 248.5 717.0Q148 668 92.5 580.0Q37 492 37 375Q37 258 92.5 170.0Q148 82 248.5 33.0Q349 -16 482 -16Q616 -16 716.0 33.0Q816 82 872.0 170.0Q928 258 928 375Q928 492 872.0 580.0Q816 668 716.0 717.0Q616 766 482 766ZM482 581Q555 581 608.0 556.0Q661 531 689.5 485.0Q718 439 718 375Q718 311 689.5 265.0Q661 219 608.0 194.0Q555 169 482 169Q410 169 357.0 194.0Q304 219 275.0 265.0Q246 311 246 375Q246 439 275.0 485.0Q304 531 357.0 556.0Q410 581 482 581ZM1348.0 445H1596.0L1922.0 806H1669.0ZM1477.0 766Q1344.0 766 1243.5 717.0Q1143.0 668 1087.5 580.0Q1032.0 492 1032.0 375Q1032.0 258 1087.5 170.0Q1143.0 82 1243.5 33.0Q1344.0 -16 1477.0 -16Q1611.0 -16 1711.0 33.0Q1811.0 82 1867.0 170.0Q1923.0 258 1923.0 375Q1923.0 492 1867.0 580.0Q1811.0 668 1711.0 717.0Q1611.0 766 1477.0 766ZM1477.0 581Q1550.0 581 1603.0 556.0Q1656.0 531 1684.5 485.0Q1713.0 439 1713.0 375Q1713.0 311 1684.5 265.0Q1656.0 219 1603.0 194.0Q1550.0 169 1477.0 169Q1405.0 169 1352.0 194.0Q1299.0 219 1270.0 265.0Q1241.0 311 1241.0 375Q1241.0 439 1270.0 485.0Q1299.0 531 1352.0 556.0Q1405.0 581 1477.0 581ZM2504.0 657H2416.0L2705.0 0H2924.0L2575.0 750H2340.0L1991.0 0H2213.0ZM3171.0 606V439H3688.0V606ZM3570.0 0 3911.0 750H3690.0L3404.0 88H3464.0L3177.0 750H2956.0L3297.0 0ZM4155.0 328H4428.0Q4478.0 328 4506.0 305.0Q4534.0 282 4534.0 241Q4534.0 199 4506.0 176.5Q4478.0 154 4428.0 154H4126.0L4219.0 55V750H4012.0V0H4457.0Q4543.0 0 4607.0 30.5Q4671.0 61 4707.0 114.5Q4743.0 168 4743.0 241Q4743.0 312 4707.0 366.0Q4671.0 420 4607.0 450.0Q4543.0 480 4457.0 480H4155.0ZM4267.0 399H4500.0L4769.0 750H4529.0Z"/></svg><em>Answers you can check</em></span>
-  </a>
-  <dl class="tb-cell"><dt>Register</dt><dd id="tb-drawings">—</dd></dl>
-  <dl class="tb-cell"><dt>Stoa questions</dt><dd id="tb-questions">—</dd></dl>
-  <dl class="tb-cell"><dt>Reader model</dt><dd id="tb-model">—</dd></dl>
-  <span class="tb-fill"></span>
-  <dl class="tb-cell tb-session"><dt>This session</dt><dd id="meter"></dd></dl>
-  <button class="tb-btn" id="open-bench">Test report<svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M2 10 10 2M4 2h6v6" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button>
+  <div class="tb-lead">
+    <a class="tb-brand" href="/" aria-label="OQVAR home"><svg class="tb-mark" viewBox="467 465 1114 1117" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M467.4 1566.3C474.4 1404.8 503.4 1252.3 557.4 1092.5C589.9 996.2 632.2 902.4 683.3 813.0C706.2 772.9 741.6 719.7 765.4 689.5C815.5 625.9 867.9 576.2 922.0 540.8C984.5 499.9 1050.8 475.4 1121.0 467.4C1138.8 465.4 1186.0 465.0 1203.0 466.8C1221.0 468.7 1243.5 472.7 1260.2 477.0C1274.4 480.6 1298.5 488.1 1305.5 491.0C1311.5 493.6 1314.6 494.9 1321.0 497.5C1340.4 505.6 1370.6 522.5 1390.5 536.5C1449.8 578.0 1496.2 632.4 1530.1 700.0C1541.6 723.0 1548.0 738.4 1555.6 761.5C1582.9 844.8 1588.2 933.1 1571.0 1020.0C1557.1 1089.9 1531.8 1157.8 1500.1 1210.3C1478.0 1246.9 1452.1 1280.1 1423.1 1309.0C1404.4 1327.6 1390.0 1339.8 1368.4 1355.3C1344.9 1372.2 1335.4 1378.1 1302.0 1396.5C1293.5 1401.1 1293.5 1401.2 1298.0 1400.6C1307.6 1399.3 1340.4 1390.6 1358.7 1384.5C1402.4 1369.9 1447.6 1346.3 1484.8 1318.6L1495.0 1311.0L1538.0 1311.0L1581.0 1311.0L1581.0 1315.2C1581.0 1320.8 1579.4 1334.9 1577.4 1347.5C1563.7 1434.2 1504.8 1513.1 1424.5 1552.5C1395.3 1566.8 1375.1 1573.1 1338.0 1579.8C1329.2 1581.3 1297.0 1581.5 897.6 1581.7L466.7 1582.0L467.4 1566.3Z M899.5 1310.0C918.3 1308.8 947.6 1305.8 961.5 1303.4C975.4 1301.1 1010.0 1293.2 1025.2 1288.9C1051.4 1281.5 1089.2 1266.6 1114.7 1253.6C1199.4 1210.5 1272.4 1143.3 1335.2 1050.5C1371.2 997.4 1406.2 929.5 1436.1 854.7C1444.0 834.9 1450.3 818.1 1462.0 785.0C1465.2 775.9 1468.2 767.7 1468.5 766.8C1469.3 764.7 1464.8 761.7 1443.4 749.9C1410.6 731.9 1392.9 724.2 1368.5 717.1C1350.8 712.0 1340.3 709.7 1322.0 706.9C1302.6 703.9 1258.5 703.6 1239.0 706.3C1157.9 717.6 1088.0 752.9 1025.7 814.0C963.9 874.4 914.8 957.0 876.1 1065.2C869.2 1084.5 868.2 1087.5 861.0 1111.0C849.6 1148.1 836.2 1204.9 828.5 1248.5C824.9 1268.5 819.1 1309.3 819.7 1310.2C820.3 1311.4 879.7 1311.1 899.5 1310.0Z"/><path fill="var(--red)" d="M1225.2 1061.8C1225.0 1036.9 1224.5 1011.8 1223.9 1006.0C1218.7 949.9 1198.3 906.2 1162.4 873.9C1152.4 865.0 1135.0 853.3 1123.8 848.0C1113.9 843.4 1094.3 836.7 1085.2 834.9C1081.8 834.2 1079.1 833.3 1079.2 832.9C1079.7 831.7 1099.0 817.0 1109.9 809.5C1151.1 781.4 1199.3 762.7 1246.5 756.5C1262.0 754.5 1293.6 754.5 1309.0 756.5C1331.8 759.5 1350.9 764.4 1372.3 772.6C1385.2 777.6 1403.9 786.7 1404.5 788.2C1404.8 788.9 1403.0 795.1 1400.6 802.0C1365.6 900.8 1318.5 991.0 1266.0 1059.4C1259.7 1067.6 1238.2 1093.3 1231.3 1100.8L1225.5 1107.1L1225.2 1061.8Z"/></svg><svg class="tb-wm" viewBox="0 0 4792 750" role="img" aria-label="OQVAR"><path fill="currentColor" d="M482 766Q349 766 248.5 717.0Q148 668 92.5 580.0Q37 492 37 375Q37 258 92.5 170.0Q148 82 248.5 33.0Q349 -16 482 -16Q616 -16 716.0 33.0Q816 82 872.0 170.0Q928 258 928 375Q928 492 872.0 580.0Q816 668 716.0 717.0Q616 766 482 766ZM482 581Q555 581 608.0 556.0Q661 531 689.5 485.0Q718 439 718 375Q718 311 689.5 265.0Q661 219 608.0 194.0Q555 169 482 169Q410 169 357.0 194.0Q304 219 275.0 265.0Q246 311 246 375Q246 439 275.0 485.0Q304 531 357.0 556.0Q410 581 482 581ZM1348.0 445H1596.0L1922.0 806H1669.0ZM1477.0 766Q1344.0 766 1243.5 717.0Q1143.0 668 1087.5 580.0Q1032.0 492 1032.0 375Q1032.0 258 1087.5 170.0Q1143.0 82 1243.5 33.0Q1344.0 -16 1477.0 -16Q1611.0 -16 1711.0 33.0Q1811.0 82 1867.0 170.0Q1923.0 258 1923.0 375Q1923.0 492 1867.0 580.0Q1811.0 668 1711.0 717.0Q1611.0 766 1477.0 766ZM1477.0 581Q1550.0 581 1603.0 556.0Q1656.0 531 1684.5 485.0Q1713.0 439 1713.0 375Q1713.0 311 1684.5 265.0Q1656.0 219 1603.0 194.0Q1550.0 169 1477.0 169Q1405.0 169 1352.0 194.0Q1299.0 219 1270.0 265.0Q1241.0 311 1241.0 375Q1241.0 439 1270.0 485.0Q1299.0 531 1352.0 556.0Q1405.0 581 1477.0 581ZM2504.0 657H2416.0L2705.0 0H2924.0L2575.0 750H2340.0L1991.0 0H2213.0ZM3171.0 606V439H3688.0V606ZM3570.0 0 3911.0 750H3690.0L3404.0 88H3464.0L3177.0 750H2956.0L3297.0 0ZM4155.0 328H4428.0Q4478.0 328 4506.0 305.0Q4534.0 282 4534.0 241Q4534.0 199 4506.0 176.5Q4478.0 154 4428.0 154H4126.0L4219.0 55V750H4012.0V0H4457.0Q4543.0 0 4607.0 30.5Q4671.0 61 4707.0 114.5Q4743.0 168 4743.0 241Q4743.0 312 4707.0 366.0Q4671.0 420 4607.0 450.0Q4543.0 480 4457.0 480H4155.0ZM4267.0 399H4500.0L4769.0 750H4529.0Z"/></svg></a>
+  </div>
+  <div class="tb-title">
+    <h1 id="d-title">—</h1>
+    <p id="d-meta"></p>
+  </div>
+  <div class="tb-end">
+    <button class="search-pill" id="open-palette" aria-label="Search drawings and commands"><span data-icon="search"></span><span class="sp-text">Search</span><kbd>⌘K</kbd></button>
+    <button class="tb-upload" id="btn-upload" title="Upload a floor plan image"><span data-icon="upload"></span><span class="tbu-t">Upload</span></button>
+    <div class="set-wrap">
+      <button class="icon-btn" id="btn-settings" aria-label="Settings" aria-haspopup="true" aria-expanded="false" aria-controls="settings" title="Settings" data-icon="gear"></button>
+      <div class="settings" id="settings" role="menu" hidden>
+        <label class="set-row" role="menuitemcheckbox"><span><b>Example drawings</b><small>Show the library of example plans</small></span><span class="switch"><input type="checkbox" id="set-examples"><span aria-hidden="true"></span></span></label>
+        <div class="set-sep"></div>
+        <button class="set-item" id="open-bench" role="menuitem"><span data-icon="chart"></span><span><b>Test report</b><small>Accuracy on Stoa's questions</small></span></button>
+        <div class="set-sep"></div>
+        <p class="set-head">Keyboard</p>
+        <dl class="set-keys"><div><dt>Search</dt><dd><kbd>⌘K</kbd></dd></div><div><dt>Example drawings</dt><dd><kbd>⌘B</kbd></dd></div><div><dt>Ask</dt><dd><kbd>/</kbd></dd></div><div><dt>Step through the marks</dt><dd><kbd>←</kbd><kbd>→</kbd></dd></div><div><dt>Details</dt><dd><kbd>⌘I</kbd></dd></div></dl>
+      </div>
+    </div>
+  </div>
 </header>
 
 <main class="desk">
-  <nav class="reg" aria-label="Drawing register">
-    <div class="pane-head"><h2>Drawing register</h2><span id="reg-count"></span></div>
-    <div class="reg-tools">
-      <label class="find"><span class="sr">Find a sheet</span>
-        <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><circle cx="7" cy="7" r="4.6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="m10.5 10.5 4 4" stroke="currentColor" stroke-width="1.5"/></svg>
-        <input id="search" type="search" placeholder="Find a sheet…" autocomplete="off" spellcheck="false"></label>
-      <div class="srcs" id="sources" role="group" aria-label="Source"></div>
-      <label class="tick"><input type="checkbox" id="only-q" checked><span aria-hidden="true"></span>Only sheets with Stoa questions</label>
-      <div class="demo"><span class="lbl">Demo set — one of each kind</span><div id="demo"></div></div>
-      <div class="upload"><span class="lbl">Your own floor plan</span>
-        <label class="btn" title="PNG, JPEG, WebP, TIFF or BMP of a drawing (large sheets are scaled to 4000 px); or drop the file on the sheet"><input type="file" id="up-file" accept="image/png,image/jpeg,image/webp,image/tiff,image/bmp" class="sr">Upload a plan image</label>
-        <small id="up-msg" aria-live="polite">or drop it on the sheet</small></div>
+  <nav class="reg" aria-label="Library">
+    <div class="reg-head"><span>Library</span><button class="icon-btn" id="lib-close" aria-label="Close the examples and go back to upload" title="Close" data-icon="x"></button></div>
+    <div class="rows" id="list-wrap">
+      <details class="grp" id="grp-ex"><summary><span data-icon="chev-r"></span>Examples</summary><div id="demo"></div></details>
+      <details class="grp" id="grp-all"><summary><span data-icon="chev-r"></span>All drawings <span id="reg-count"></span></summary>
+        <div class="reg-tools">
+          <label class="find"><span class="sr">Find a drawing</span><span data-icon="search"></span>
+            <input id="search" type="search" placeholder="Find a drawing" autocomplete="off" spellcheck="false"></label>
+          <div class="filters">
+            <select id="sources" class="popup" aria-label="Source"></select>
+            <label class="switch" title="Only drawings that come with Stoa's questions"><input type="checkbox" id="only-q" checked><span aria-hidden="true"></span>Has questions</label>
+          </div>
+        </div>
+        <div id="list"></div>
+      </details>
     </div>
-    <div class="rows" id="list"></div>
   </nav>
 
-  <section class="board" aria-label="Drawing">
-    <header class="board-bar">
-      <div class="sheet-id"><span class="lbl">Sheet</span><h1 id="d-title">—</h1><p id="d-meta"></p></div>
-      <div class="tools">
-        <select id="sheet-select" class="hidden" aria-label="Sheet of this drawing"></select>
-        <div class="seg" id="view-seg"><button data-view="sheet" class="on">Sheet</button><button data-view="3d" id="btn-3d">3D model</button></div>
-        <div class="seg"><button id="btn-graph" aria-pressed="false" title="Show how the rooms connect: doors, open connections and shared walls">Room graph</button><button id="btn-heat" aria-pressed="false" title="Colour every mark by how it was established: green direct, amber inferred, red needs sign-off">Confidence</button><button id="btn-split" aria-pressed="false" title="Put a second sheet beside this one: another sheet of the set, a storey or the legend">Split</button></div>
-        <div class="zoom"><button id="z-out" aria-label="Zoom out">−</button><output id="z-val">100%</output><button id="z-in" aria-label="Zoom in">+</button><button id="z-fit">Fit</button></div>
-      </div>
-    </header>
+  <section class="board" id="board" aria-label="Drawing">
     <div class="stage" id="stage">
       <div class="canvas" id="canvas"></div>
       <iframe id="three" class="hidden" title="3D model"></iframe>
       <div class="stage-msg" id="stage-msg" aria-live="polite"></div>
-      <div class="stepper hidden" id="stepper">
-        <button id="st-prev" aria-label="Previous item">←</button><output id="st-label"></output><button id="st-next" aria-label="Next item">→</button><button id="st-all">All</button>
+      <div class="start" id="start" hidden>
+        <button class="start-btn" id="start-choose" title="PNG, JPEG, WebP, TIFF or BMP — or drop the image anywhere here"><span data-icon="upload"></span>Upload</button>
+        <p class="start-sub">Upload a sheet or use <button class="link" id="start-examples">Examples</button></p>
+        <small id="up-msg" aria-live="polite"></small>
+      </div>
+      <div class="hud zoom" role="group" aria-label="Zoom">
+        <button id="z-in" aria-label="Zoom in" title="Zoom in" data-icon="plus"></button>
+        <output id="z-val">100%</output>
+        <button id="z-out" aria-label="Zoom out" title="Zoom out" data-icon="minus"></button>
+        <button id="z-fit" aria-label="Fit the sheet" title="Fit" data-icon="fit"></button>
       </div>
     </div>
-    <footer class="credit"><span class="lbl">Credit</span><p id="credit"></p></footer>
+
+    <div class="vcap" id="vcap" role="toolbar" aria-label="View">
+      <div class="seg" id="view-seg" role="group" aria-label="View">
+        <button data-view="sheet" class="on" aria-pressed="true"><span data-icon="doc"></span>Sheet</button>
+        <button data-view="3d" id="btn-3d" aria-pressed="false"><span data-icon="cube"></span>3D</button>
+      </div>
+      <select id="sheet-select" class="popup hidden" aria-label="Sheet of this drawing"></select>
+      <span class="vsep" aria-hidden="true"></span>
+      <button class="icon-btn" id="btn-graph" aria-pressed="false" aria-label="Room graph" title="Room graph — how the rooms connect" data-icon="graph"></button>
+      <button class="icon-btn" id="btn-heat" aria-pressed="false" aria-label="Confidence colours" title="Confidence — colour each mark by how it was found" data-icon="shield"></button>
+      <button class="icon-btn" id="btn-split" aria-pressed="false" aria-label="Split view" title="Split view — another sheet or the legend beside this one" data-icon="split"></button>
+    </div>
+
+    <p class="credit" id="credit-wrap" tabindex="0"><span data-icon="info"></span><span id="credit"></span></p>
+
+    <div class="dock" id="dock">
+      <article class="card hidden" id="card" aria-live="polite"></article>
+      <div class="hist" id="hist" role="menu" aria-label="Earlier answers" hidden></div>
+      <form class="ask" id="ask">
+        <label class="sr" for="q">Ask about this drawing</label>
+        <button type="button" class="icon-btn" id="btn-hist" aria-label="Earlier answers" title="Earlier answers" aria-haspopup="true" aria-expanded="false" aria-controls="hist" data-icon="history"><b id="hist-n"></b></button>
+        <textarea id="q" rows="1" placeholder="Ask about this drawing, in any language"></textarea>
+        <button type="button" class="icon-btn mic" id="mic" aria-label="Ask by voice" title="Ask by voice" data-icon="mic"></button>
+        <button class="send" id="send" aria-label="Ask" data-icon="send"></button>
+      </form>
+    </div>
   </section>
 
-  <aside class="chk" aria-label="Check sheet">
-    <div class="pane-head"><h2>Check sheet</h2><span>Geometry first · a model only when needed</span></div>
-    <form class="ask" id="ask">
-      <label class="lbl" for="q">Question</label>
-      <textarea id="q" rows="2" placeholder="Ask in any language — How many doors? Wie gross ist Wohnung A?"></textarea>
-      <div class="ask-row">
-        <button type="button" class="btn sq" id="mic" aria-label="Ask by voice"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="5.5" y="1" width="5" height="9" rx="2.5" fill="currentColor"/><path d="M3 8a5 5 0 0 0 10 0M8 13v2.5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button>
-        <span class="keys"><kbd>/</kbd> focus <kbd>↵</kbd> ask <kbd>←</kbd><kbd>→</kbd> step evidence</span>
-        <button class="btn solid" id="send">Ask</button>
-      </div>
-    </form>
-    <section class="std" aria-label="Suggested questions">
-      <div class="tabs"><button id="tab-stoa" class="on">Stoa's questions <i id="q-count"></i></button><button id="tab-free">Free-form</button></div>
-      <ol class="qlist" id="suggest"></ol>
-    </section>
-    <div class="recs" id="thread" aria-live="polite"></div>
+  <aside class="insp" id="inspector" aria-label="Answer details">
+    <header class="insp-head"><h2>Details</h2><button class="icon-btn" id="insp-close" aria-label="Close the details" title="Close (⌘I)" data-icon="x"></button></header>
+    <div class="insp-body" id="insp-body"></div>
   </aside>
 </main>
 
+<dialog class="palette" id="palette" aria-label="Search drawings and commands">
+  <div class="pal-in"><span data-icon="search"></span><input id="pal-q" placeholder="Search drawings, ask, or run a command" autocomplete="off" spellcheck="false"><kbd>esc</kbd></div>
+  <div class="pal-list" id="pal-list" role="listbox"></div>
+  <p class="pal-foot"><kbd>↑</kbd><kbd>↓</kbd> move <kbd>↵</kbd> open <kbd>esc</kbd> close</p>
+</dialog>
+
 <dialog class="report" id="bench" aria-labelledby="bench-title">
-  <header><div><span class="lbl">Test report</span><h2 id="bench-title">Measured on Stoa's question set</h2></div><button class="btn" id="close-bench">Close</button></header>
+  <header><div><span class="lbl">Test report</span><h2 id="bench-title">Measured on Stoa's questions</h2></div><button class="icon-btn" id="close-bench" aria-label="Close" data-icon="x"></button></header>
   <div id="bench-body"></div>
 </dialog>
+<input type="file" id="up-file" class="sr" tabindex="-1" aria-hidden="true" accept="image/png,image/jpeg,image/webp,image/tiff,image/bmp">
 <div id="tip" class="tip hidden" role="tooltip"></div>
 <script type="module" src="/web/app.js"></script>
 </body>
