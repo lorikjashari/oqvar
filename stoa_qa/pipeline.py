@@ -18,7 +18,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import audit, catalog, construction_detect, cubicasa, docqa, explain, graph, legend, llm, mep, planner, router, sheets, uploads, vision, xref
+from . import (audit, catalog, construction_detect, cubicasa, docqa, explain, graph, legend, llm, materials, mep, planner, router,
+               sheets, uploads, vision, xref)
 from .catalog import Drawing
 from .core import Answer, fmt_value
 
@@ -80,6 +81,7 @@ CREW = {
     "bim": ("Quantity surveyor", "counts and quantities from the BIM model"),
     "detection": ("Quantity surveyor", "counts from detectors on the scanned plan"),
     "mep": ("MEP engineer", "pipes, ducts, terminals, systems and their connections"),
+    "materials": ("Materials specialist", "material layers in the model, finish / door schedules, notes, hatches on the plan"),
     "xref": ("Reference clerk", "follows callouts like 6A/A-401 to the detail they point at"),
     "planner": ("Planner", "an LLM writes one query; the numbers are computed"),
     "document": ("Document clerk", "rows of the sheet's own text"),
@@ -107,7 +109,10 @@ def solve(d: Drawing, question: str, sheet: tuple[str, int] | None = None) -> Re
     requested_marks = uploaded and re.search(r"\b(highlight|mark|show me|point out)\b", question, re.I)
     visual_count = uploaded and cubicasa.upload_question_key(question) is not None
     topology = not exact and graph.intent_of(question) is not None
-    services = not exact and d.source in ("ifc_models", "ifc_bench") and mep.intent_of(question) is not None
+    material = not exact and materials.intent_of(question) is not None
+    services = (not exact and d.source in ("ifc_models", "ifc_bench") and mep.intent_of(question) is not None
+                and not (material and materials.intent_of(question).elements and not set(materials.intent_of(question).elements)
+                         & {"pipe", "duct", "conduit"}))
     simple = (d.source in TEMPLATED and not COMPLEX.search(question) and len(question.split()) <= 22 and not topology and not services
               and (d.source == "cubicasa5k" or template_shaped(question)))
     sheet_info = not exact and SHEET_INFO.search(question) is not None
@@ -135,6 +140,20 @@ def solve(d: Drawing, question: str, sheet: tuple[str, int] | None = None) -> Re
         asked("mep", a, t)
         if a is not None and a.value is not None:
             return done(a, "mep", "Read from the model's distribution elements, systems and ports")
+
+    # 0a. materials: model material layers, schedules + finish keys, notes, hatches, then a boxed vision reading (no LLM before that)
+    material_vision = False
+    if material:
+        t = time.perf_counter()
+        a, tried = materials.answer(d, question, sheet, use_llm=llm.available())
+        if a is not None:
+            steps = "; ".join(f"{x['source']}: {x['outcome']}" for x in tried)
+            asked("materials", a if a.value is not None else Answer(None, None, a.intent, 0.0, steps or a.method), t)
+            material_vision = any(x["source"] == "vision" for x in tried)
+            if a.value is not None:
+                via = next((x["source"] for x in tried if x["outcome"] == "answered"), "")
+                return done(a, "materials", f"Materials read from {via or 'the drawing'}")
+            fallback = a  # nothing found: later engines may still answer (planner over properties, document clerk)
 
     # 0b. topology: how rooms connect, traversed on the room graph (no LLM)
     if topology:
@@ -165,13 +184,14 @@ def solve(d: Drawing, question: str, sheet: tuple[str, int] | None = None) -> Re
         usage += _usage(u)
         asked("planner", a, t, tokens(u))
         scoped = fallback is not None and fallback.intent == "scoped"  # the template engine asked "which room?": keep that question
+        searched = fallback is not None and fallback.intent == "no_material"  # the materials specialist's list of what it searched
         if a.value is not None:
             return done(a, "planner", f"Query planned by {llm.MODEL.split('/')[-1]}, executed on exact data")
         if a.intent == "unanswerable" and not sheet_info:
-            if scoped:
+            if scoped or searched:
                 return done(fallback, "none", "")
             return done(a, "planner", f"Query planned by {llm.MODEL.split('/')[-1]}, executed on exact data")
-        if not scoped:
+        if not scoped and not searched:
             fallback = a if a.intent == "unanswerable" else (fallback or a)  # the sheet may still show it (title block, north arrow)
 
     # 1b. template engine as a last structured resort (question had 'complex' wording but nothing else answered)
@@ -236,7 +256,7 @@ def solve(d: Drawing, question: str, sheet: tuple[str, int] | None = None) -> Re
     if (uploaded and fallback is not None and fallback.intent == "unreadable"
             and cubicasa.upload_question_key(question) in ("bathrooms", "toilets", "sinks", "showers", "bathtubs", "baths")):
         return done(fallback, "none", "")
-    if raster is not None and llm.available():
+    if raster is not None and llm.available() and not material_vision:  # a material question already had its boxed vision read
         kind, path, page = raster
         t = time.perf_counter()
         img = sheets.raster_path(kind, path, page)
@@ -327,6 +347,8 @@ def _raster_basis(ref: str) -> str:
     if ref.startswith("vision"):
         return "review"
     if ref.startswith("L") and ref[1:].isdigit():  # a printed row of the PDF's text (stoa_qa.docqa)
+        return "direct"
+    if ref.startswith(("tag-", "note-")):  # a printed room tag / note on the sheet (stoa_qa.materials_sheet)
         return "direct"
     return "inferred"  # yolo / tiles / seg / wet / floor / net: detector and network marks
 

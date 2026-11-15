@@ -47,6 +47,12 @@ def build_dataset() -> None:
     _rect(msp, "FIXTURE", 5.2, 0.1, 5.8, 0.5)       # washbasin: outline + bowl ellipse + drain
     _ellipse(msp, 5.5, 0.3, 0.2, 0.12)
     msp.add_circle((5.5, 0.3), 0.02, dxfattribs={"layer": "FIXTURE"})
+    # wall poché as the dataset draws it: one wall with the ANSI31 section hatch, one solid (stoa_qa.hatch reads the names)
+    h = msp.add_hatch(dxfattribs={"layer": "WALL"})
+    h.set_pattern_fill("ANSI31", scale=0.02)
+    h.paths.add_polyline_path([(-0.2, -0.2), (6.2, -0.2), (6.2, 0.0), (-0.2, 0.0)], is_closed=True)
+    s = msp.add_hatch(color=8, dxfattribs={"layer": "WALL"})
+    s.paths.add_polyline_path([(3.95, 0.0), (4.05, 0.0), (4.05, 0.5), (3.95, 0.5)], is_closed=True)
     doc.saveas(d / f"{STEM}.dxf")
     # the sheet: a PDF with the room numbers printed where the DXF has them (40 pt per metre), and its PNG at 2x
     import pymupdf

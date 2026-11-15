@@ -19,8 +19,8 @@ import re
 from .core import Answer
 
 CARRIES = {
-    "swiss_dwellings": "This is a 2D CAD floor plan. It holds room outlines with labels and areas, apartments, doors, windows and "
-                       "sanitary fixtures, but no heights, materials, construction years or title-block details.",
+    "swiss_dwellings": "This is a 2D CAD floor plan. It holds room outlines with labels and areas, apartments, doors, windows, "
+                       "sanitary fixtures and wall hatching, but no heights, named materials, construction years or title-block details.",
     "ifc_models": "This is a BIM model. It holds storeys, spaces, building elements and whatever properties the author filled in; "
                   "anything not modelled or left empty cannot be read from it.",
     "ifc_bench": "This is a BIM model. It holds storeys, spaces, building elements and whatever properties the author filled in; "
@@ -50,6 +50,8 @@ def category(answer: Answer, trace: list[dict], llm_ok: bool) -> str:
         return "unverified_marks"
     if answer.intent == "unreadable":  # stoa_qa.cubicasa.readable: a count of 0 would have been a blind guess
         return "unreadable"
+    if answer.intent == "no_material":  # stoa_qa.materials searched model, schedules, notes, hatches and the image
+        return "no_material"
     notes = " ".join([answer.method or ""] + [t.get("note") or "" for t in trace]).lower()
     # the planner's decline contract (stoa_qa.planner.answer): unanswerable / error / unknown / plan_* with no rows
     if re.search(r"fea\w*_api_key is not set|api key", notes):
@@ -78,6 +80,7 @@ HEADLINE = {
     "failed": "A reader failed on this question",
     "ambiguous": "Which room or apartment do you mean?",
     "unreadable": "The detectors can't read this drawing, so I won't guess a count",
+    "no_material": "No material is shown for this on the drawing",
 }
 NEXT = {
     "unverified_marks": "Try a sharper drawing or crop to the area you want to inspect.",
@@ -87,6 +90,8 @@ NEXT = {
     "failed": "Asking again often works; the questions below use other readers.",
     "ambiguous": "Name it the way the drawing labels it (a room number like 2.14, a label, or an apartment letter).",
     "unreadable": "Upload a tighter crop of one floor, or a plan at a larger scale; on drawings like this the count needs a person.",
+    "no_material": "Materials are usually on the finish / door schedules, wall sections or specifications: open another sheet "
+                   "of the set, or ask about the materials this drawing does name.",
 }
 
 
@@ -128,10 +133,11 @@ def _capabilities(d) -> list[str]:
         out.append("Which rooms have no window?")
     if src == "swiss_dwellings":
         out += ["Which room is the largest?", "How many apartments are shown on this floor plan?", "How many doors are drawn on this floor plan?",
-                "Which rooms have a toilet?", "What is the total net floor area of all rooms?"]
+                "Which rooms have a toilet?", "What is the total net floor area of all rooms?", "What are the walls made of?"]
     elif src in ("ifc_models", "ifc_bench"):
         out += ["Which room is the largest?", "How many windows are there on each storey?", "Which software created this model?",
-                "What is the total length of the exterior walls?", "What are the heights of the storeys?"]
+                "What is the total length of the exterior walls?", "What are the heights of the storeys?",
+                "Which materials are used in the exterior walls?", "Where is concrete used?"]
         try:
             from . import mep
 
@@ -144,7 +150,7 @@ def _capabilities(d) -> list[str]:
                 "How many windows are shown on this floor plan?", "Is there a sauna?"]
     elif src == "opening_design":
         out += ["Which other sheets does this sheet refer to?", "What is the title of this sheet?", "Who is the architect on the title block?",
-                "What is the scale of this drawing?"]
+                "What is the scale of this drawing?", "Which materials are noted on this sheet?"]
     else:
         out += ["What does this drawing show?", "What text is written on the drawing?", "When was this drawing made?"]
     stoa = [q["question"] for q in catalog.questions_for(d) if re.match(r"(?:How|What|Which|Is|Are|Does)\b", q["question"])][:30]  # English ones

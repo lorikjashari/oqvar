@@ -74,6 +74,7 @@ class Floor:
     walls: list[tuple[str, Polygon]] = field(default_factory=list)
     door_lines: list = field(default_factory=list)  # 2-point opening lines on layer DOOR (the leaf swing is in `doors`)
     room_texts: list = field(default_factory=list)  # every ROOM_TEXT as (text, insert point, align point)
+    hatches: list = field(default_factory=list)     # every HATCH as (handle, layer, pattern name, polygon): wall poché
 
     @property
     def numbered(self) -> list[Room]:
@@ -107,7 +108,7 @@ def read_dxf(path: str) -> Floor:
     doc = ezdxf.readfile(path)
     msp = doc.modelspace()
     outlines, units, texts, doors, windows, walls, door_lines = [], [], [], [], [], [], []
-    fx_rects, fx_other, room_texts = [], [], []
+    fx_rects, fx_other, room_texts, hatches = [], [], [], []
     for e in msp:
         layer, kind = e.dxf.layer, e.dxftype()
         if kind == "LWPOLYLINE":
@@ -147,6 +148,17 @@ def read_dxf(path: str) -> Floor:
             al = e.dxf.align_point if e.dxf.hasattr("align_point") else ins
             texts.append((e.dxf.text.strip(), (ins.x, ins.y)))
             room_texts.append((e.dxf.text.strip(), (ins.x, ins.y), (al.x, al.y)))
+        elif kind == "HATCH":
+            for bp in e.paths:
+                try:
+                    pts = [(v[0], v[1]) for v in bp.vertices]
+                except AttributeError:  # an edge path: its edges' start points
+                    pts = [(ed.start[0], ed.start[1]) for ed in getattr(bp, "edges", []) if hasattr(ed, "start")]
+                if len(pts) >= 3:
+                    p = Polygon(pts)
+                    p = p if p.is_valid else p.buffer(0)
+                    if p.area > 0:
+                        hatches.append((e.dxf.handle, layer, "SOLID" if e.dxf.solid_fill else e.dxf.pattern_name, p))
 
     # rooms: net area = gross - directly nested room outlines (shafts, voids inside rooms)
     rooms = [Room(handle=h, poly=p, gross=p.area) for h, p in outlines]
@@ -191,7 +203,7 @@ def read_dxf(path: str) -> Floor:
             "circ": [o[1] for o in inside if o[0] == "circle"],
             "polys": sorted(o[1] for o in inside if o[0] == "poly" and o[1] not in (2, 48)),
         })
-    return Floor(Path(path).stem, rooms, units, apt_tags, doors, windows, fixtures, walls, door_lines, room_texts)
+    return Floor(Path(path).stem, rooms, units, apt_tags, doors, windows, fixtures, walls, door_lines, room_texts, hatches)
 
 
 # ---------------------------------------------------------------- intents
