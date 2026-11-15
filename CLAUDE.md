@@ -48,7 +48,7 @@ Entry: `stoa_qa/api.py` `POST /api/ask` → `pipeline.respond()` → `pipeline.s
 trustworthy engine first; each one may decline and pass on:
 
 0. `materials` (material wording: model layers → schedules / finish keys / plan notes → hatches → boxed vision; see
-   README "Materials"), `mep` (IFC services wording) and `graph` (room topology: routes, adjacency, doors between rooms) — no LLM
+   docs/MATERIALS.md), `mep` (IFC services wording) and `graph` (room topology: routes, adjacency, doors between rooms) — no LLM
 1. template engines via `router.SOLVERS` (`swiss` / `ifc` / `cubicasa`) — no LLM, for dataset-shaped questions.
    `lang.py` parses object/quantity/scope from multilingual keyword stems; `scope.py` refuses to answer a
    room/apartment-scoped question with a floor-wide number.
